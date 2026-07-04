@@ -1,4 +1,30 @@
+import type { AgentTurn, AgentUnderTest } from '../src/core/agent.js';
 import type { EvalCaseInput } from '../src/core/case-schema.js';
+
+/**
+ * Deterministic scripted AgentUnderTest for tests: each session pops turns
+ * from the list. A turn given as a string is a final message.
+ */
+export function scriptedAgent(turns: readonly (AgentTurn | string)[]): AgentUnderTest {
+  return {
+    label: 'scripted-agent',
+    createSession() {
+      const queue = [...turns];
+      return {
+        next() {
+          const turn = queue.shift();
+          if (turn === undefined) {
+            return Promise.resolve({ toolCalls: [], message: '(out of scripted turns)' });
+          }
+          if (typeof turn === 'string') {
+            return Promise.resolve({ toolCalls: [], message: turn });
+          }
+          return Promise.resolve(turn);
+        },
+      };
+    },
+  };
+}
 
 export const SOL_DEVNET_CHAIN_ID = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
 
