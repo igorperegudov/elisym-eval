@@ -43,8 +43,23 @@ describe('safeRegExp', () => {
     }
   });
 
-  test('rejects sequential unbounded quantifiers (polynomial backtracking)', () => {
-    for (const bad of ['a*a*b', '.*.*=', '\\d*\\d*b', 'a*a*a*b', 'a*.*', '\\d+-\\d+', 'a+b+']) {
+  test('rejects two repetition-capable quantifiers (polynomial backtracking)', () => {
+    for (const bad of [
+      'a*a*b',
+      '.*.*=',
+      '\\d*\\d*b',
+      'a*a*a*b',
+      'a*.*',
+      '\\d+-\\d+',
+      'a+b+',
+      // adjacent BOUNDED pairs are the same overlapping-span mechanism
+      'a{0,1000}a{0,1000}b',
+      '.{0,1000}.{0,1000}=',
+      'a{2,1000}a{2,1000}b',
+      'a{0,1000}a*b',
+      'a*a{0,1000}b',
+      '\\d{4}-\\d{2}', // safe in isolation, but two max>=2 quantifiers -> over-rejected
+    ]) {
       expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
     }
   });
@@ -92,7 +107,8 @@ describe('safeRegExp', () => {
       '(?<year>\\d{4})',
       '(?=foo)bar',
       '(?<=x)y+',
-      '\\d{4}-\\d{2}',
+      '\\d{4}', // a single bounded quantifier is fine
+      'settled: (inv-\\d+)', // one unbounded quantifier
     ]) {
       expect(() => safeRegExp(ok), ok).not.toThrow();
     }

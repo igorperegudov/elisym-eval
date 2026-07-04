@@ -86,24 +86,28 @@ function parseQuantifier(pattern: string, i: number): Quantifier | null {
 /**
  * Sound over-approximation of catastrophic-backtracking risk.
  *
- * Worst-case super-linear matching requires a repetition that can consume the
- * same input span in more than one way. In JS regex that happens in exactly
- * these shapes:
- *   (a) two or more unbounded quantifiers (`*`, `+`, `{n,}`) - the polynomial
- *       `a*a*b` / `.*.*=` and nested-exponential `(a+)+` families;
- *   (b) a quantifier whose effective max is >= 2 (or unbounded) applied to an
- *       AMBIGUOUS group - one whose body contains an alternation or a nested
- *       quantifier: `(a|a)*`, `(a?){30}`, `(.*){10}`, `(a+){10}`; or
- *   (c) a backreference (`\1`-`\9`, `\k<name>`), not linear-time in general.
- * A group whose body is a fixed concatenation of atoms (no alternation, no
- * quantifier) matches exactly one way, so repeating it stays linear - hence a
- * pattern avoiding (a)-(c) runs in linear time.
+ * Worst-case super-linear matching in a backtracking engine has exactly these
+ * mechanisms; a "repetition-capable" quantifier is one that can match a span in
+ * more than one length (`*`, `+`, `{n,}`, or `{n,m}`/`{n}` with max >= 2 - but
+ * NOT `?`, whose two choices matter only under another repetition):
+ *   (a) two or more repetition-capable quantifiers can consume overlapping
+ *       spans -> polynomial (`a*a*b`, `a{0,1000}a{0,1000}b`, `.*.*=`);
+ *   (b) a repetition-capable quantifier applied to an AMBIGUOUS group - one
+ *       whose body contains an alternation or a nested quantifier -> exponential
+ *       (`(a|a)*`, `(a?){30}`, `(.*){10}`, `(a+){10}`);
+ *   (c) a backreference (`\1`-`\9`, `\k<name>`), not linear-time in general;
+ *   (d) a single finite repetition with a huge max scans quadratically
+ *       (`a{999999}`), capped by MAX_QUANTIFIER_REPEAT.
+ * A pattern with at most one repetition-capable quantifier, none over an
+ * ambiguous group, no backreference, and no huge count runs in linear time -
+ * there is no other super-linear mechanism.
  *
  * This is a deliberate over-approximation: it also rejects some safe patterns
- * (`a*b*` with disjoint alphabets, `\d+-\d+`, `(a|b){2}`). Rewrite those with a
- * single quantifier or a character class. Escapes and character classes are
- * skipped so `\+`, `[+*|]` are literals. Sound against the known ReDoS families
- * without a native engine (re2 crashes under Bun), but not a minimal one.
+ * (`a*b*` over disjoint alphabets, `\d{4}-\d{2}` separated by a literal). Use a
+ * single quantifier, a character class, or the output structure length check
+ * instead. Escapes and character classes are skipped so `\+`, `[+*|]` are
+ * literals. Sound against catastrophic backtracking without a native engine
+ * (re2 crashes under Bun); not a minimal over-approximation.
  */
 function isRiskyRegex(pattern: string): boolean {
   interface Group {
@@ -113,7 +117,7 @@ function isRiskyRegex(pattern: string): boolean {
   const stack: Group[] = [];
   let lastClosed: Group | null = null;
   let inClass = false;
-  let unboundedCount = 0;
+  let repeatableCount = 0;
 
   const markEnclosingAmbiguous = (): void => {
     const top = stack[stack.length - 1];
@@ -191,13 +195,16 @@ function isRiskyRegex(pattern: string): boolean {
       // A quantifier in a group's body makes that body ambiguous (optionality /
       // length ambiguity).
       markEnclosingAmbiguous();
-      if (quant.unbounded) {
-        unboundedCount++;
-        if (unboundedCount >= 2) {
-          return true; // (a) two overlapping unbounded quantifiers
+      // (a) two repetition-capable quantifiers (unbounded OR finite max>=2) can
+      // consume overlapping spans -> polynomial (`a*a*b`, `a{0,1000}a{0,1000}b`).
+      // `?` (max 1) is not repetition-capable and only matters under (b).
+      if (quant.unbounded || quant.maxAtLeast2) {
+        repeatableCount++;
+        if (repeatableCount >= 2) {
+          return true;
         }
       }
-      // (b) a repetition (max>=2 or unbounded) over an ambiguous group.
+      // (b) a repetition (max>=2 or unbounded) over an ambiguous group -> exponential.
       if (
         (quant.unbounded || quant.maxAtLeast2) &&
         lastClosed !== null &&
