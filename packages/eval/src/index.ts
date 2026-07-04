@@ -116,6 +116,7 @@ export {
   type Metrics,
   type TagMetrics,
 } from './core/metrics.js';
+export { applyModifiers, injectIntoToolResults, type InjectionModifier } from './core/redteam.js';
 export { buildJsonReport, type RunReport, type RunReportMeta } from './core/report-json.js';
 export { buildMarkdownReport } from './core/report-md.js';
 export {

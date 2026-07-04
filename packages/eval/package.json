@@ -25,6 +25,7 @@
   },
   "files": [
     "dist",
+    "datasets/v0/payments-v0.jsonl",
     "README.md"
   ],
   "type": "module",
@@ -87,6 +88,7 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
+    "dataset:check": "bun dist/cli.js compile datasets/v0/index.ts --out datasets/v0/payments-v0.jsonl --check && bun dist/cli.js validate datasets/v0/payments-v0.jsonl",
     "dev": "tsup --watch",
     "format:check": "oxfmt --check src/ tests/",
     "lint": "oxlint src/",

@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { calibrateCli } from './calibrate.js';
+import { compileCli } from './compile.js';
 import { runCli } from './run.js';
 import { formatValidateReport, validateFiles } from './validate.js';
 
@@ -92,6 +93,24 @@ program
         process.exit(code);
       },
     ),
+  );
+
+program
+  .command('compile')
+  .description(
+    'Compile a TS-authored dataset (exports cases + optional modifiers) to canonical JSONL',
+  )
+  .argument('<entry>', 'dataset entry module (TS entries need the CLI to run under Bun)')
+  .requiredOption('--out <file.jsonl>', 'output JSONL path')
+  .option('--check', 'verify the output file is up to date instead of writing (CI gate)', false)
+  .option('--no-modifiers', 'skip injection modifiers (base cases only)')
+  .action(
+    safe(async (entry: string, options: { out: string; check: boolean; modifiers: boolean }) => {
+      const code = await compileCli(entry, options);
+      if (code !== 0) {
+        process.exit(code);
+      }
+    }),
   );
 
 program
