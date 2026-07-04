@@ -3,6 +3,7 @@ import { EvalConfigError } from '../errors.js';
 import type { LLMClient } from '../llm-client.js';
 import type { TraceEvent } from '../trace.js';
 import { evaluateOutput } from './output.js';
+import { evaluatePaymentCheck } from './payment.js';
 import { evaluateTraceCheck, type AssertionOutcome } from './trace.js';
 
 export type { AssertionOutcome } from './trace.js';
@@ -57,6 +58,7 @@ export async function evaluateAssertion(
     case 'output':
       return evaluateOutput(assertion, ctx.trace);
     case 'payment':
+      return evaluatePaymentCheck(assertion.check, ctx.trace, ctx.payment);
     case 'structuredReferences':
     case 'retrieval':
     case 'judge':

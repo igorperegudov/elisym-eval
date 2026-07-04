@@ -42,6 +42,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./payments": {
+      "import": {
+        "types": "./dist/payments.d.ts",
+        "default": "./dist/payments.js"
+      },
+      "require": {
+        "types": "./dist/payments.d.cts",
+        "default": "./dist/payments.cjs"
+      }
     }
   },
   "scripts": {

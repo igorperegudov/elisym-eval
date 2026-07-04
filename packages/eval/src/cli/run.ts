@@ -14,6 +14,7 @@ import {
   type RunMode,
   type RunnerConfig,
 } from '../core/runner.js';
+import { createMockAdapterFactory } from '../payments/index.js';
 
 export interface RunCliOptions {
   /** Module path to load, or an AgentUnderTest instance for programmatic use. */
@@ -64,6 +65,11 @@ export async function runCli(
 ): Promise<number> {
   const agent =
     typeof options.agent === 'string' ? await loadAgentModule(options.agent) : options.agent;
+
+  // Zero-config mocked payments: cases with payment tools get the mock ledger.
+  if (options.mode === 'mocked' && bindings.paymentTools === undefined) {
+    bindings = { ...bindings, paymentTools: createMockAdapterFactory() };
+  }
 
   let cases = [];
   for (const file of files) {
