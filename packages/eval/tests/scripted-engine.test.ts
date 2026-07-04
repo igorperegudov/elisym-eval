@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import type { z } from 'zod';
 import { ScenarioSchema, type MockTool, MockToolSchema } from '../src/core/case-schema.js';
 import { NotImplementedError } from '../src/core/errors.js';
 import { runScriptedScenario } from '../src/core/scenario-scripted.js';
@@ -19,7 +20,7 @@ function scripted(steps: unknown[], maxToolRoundsPerStep?: number) {
   return parsed;
 }
 
-function weatherTool(overrides: Partial<MockTool> = {}): MockTool {
+function weatherTool(overrides: Partial<z.input<typeof MockToolSchema>> = {}): MockTool {
   return MockToolSchema.parse({
     kind: 'mock',
     name: 'get_weather',
