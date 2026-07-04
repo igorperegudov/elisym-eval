@@ -1,0 +1,68 @@
+{
+  "name": "@elisym/eval",
+  "version": "0.1.0",
+  "description": "Eval harness for payment-enabled AI agents - deterministic assertions over traces and ledgers",
+  "keywords": [
+    "eval",
+    "evaluation",
+    "ai-agents",
+    "payments",
+    "llm",
+    "benchmarks",
+    "prompt-injection"
+  ],
+  "homepage": "https://github.com/elisymlabs/elisym-eval#readme",
+  "bugs": "https://github.com/elisymlabs/elisym-eval/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elisymlabs/elisym-eval.git",
+    "directory": "packages/eval"
+  },
+  "license": "MIT",
+  "author": "elisym labs",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "elisym-eval": "./dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "dev": "tsup --watch",
+    "format:check": "oxfmt --check src/ tests/",
+    "lint": "oxlint src/",
+    "qa": "tsup && vitest run && tsc --noEmit && oxlint src/ && oxfmt --check src/ tests/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "~13.1.0",
+    "zod": "~3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "~22.0.0",
+    "tsup": "~8.4.0",
+    "typescript": "~5.7.0",
+    "vitest": "~3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

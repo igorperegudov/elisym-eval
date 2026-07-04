@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+logs
+*.log
+.idea
+.vscode
+temp/
+.cache/
+.claude/settings.local.json

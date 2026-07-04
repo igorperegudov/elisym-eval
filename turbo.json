@@ -1,0 +1,30 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "dataset:check": {
+      "dependsOn": ["build"]
+    },
+    "test:live": {
+      "cache": false,
+      "dependsOn": ["build"],
+      "passThroughEnv": ["ELISYM_EVAL_DEVNET_PAYER", "ELISYM_EVAL_DEVNET_PAYEE", "ELISYM_EVAL_RPC_URL"]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

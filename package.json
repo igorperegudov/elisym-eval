@@ -1,0 +1,27 @@
+{
+  "name": "elisym-eval",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean",
+    "dev": "turbo run dev",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint packages/eval/src/",
+    "qa": "turbo run build && turbo run test && turbo run typecheck && bun run lint && oxfmt --check . && bun run spell && turbo run dataset:check",
+    "spell": "cspell --no-progress \"packages/eval/src/**\" \"packages/eval/tests/**\" \"packages/eval/datasets/**/*.ts\" \"*.md\" \"packages/*/README.md\"",
+    "test": "turbo run test",
+    "test:live": "turbo run test:live",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "cspell": "~9.0.0",
+    "oxfmt": "~0.42.0",
+    "oxlint": "~0.16.0",
+    "turbo": "~2.4.0",
+    "typescript": "~5.7.0"
+  },
+  "packageManager": "bun@1.3.11"
+}
