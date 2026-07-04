@@ -13,8 +13,10 @@ import vm from 'node:vm';
  *   `a?a?...a?a...a` 2^N chain. A `node:vm` timeout does NOT interrupt this:
  *   V8 only checks for interrupts when ADVANCING the start position, not within
  *   an attempt. So this regime is bounded STATICALLY (`isRiskyRegex`): a cap on
- *   the number of variable-length quantifiers (MAX_VARIABLE_QUANTIFIERS) bounds
- *   the 2^N factor, plus rejection of a repetition over an ambiguous group, a
+ *   the number of variable-length matchers (MAX_VARIABLE_QUANTIFIERS) - counting
+ *   both variable-length quantifiers AND length-ambiguous alternation groups
+ *   (`(a|)` == `a?`, `(aa|a)`), since a run of either is 2^N - bounds the
+ *   factor, plus rejection of a repetition over an ambiguous group, a
  *   backreference, and a huge bounded count.
  *
  *   MULTI-POSITION blowup - an unanchored pattern retried across O(n) start
@@ -151,6 +153,8 @@ function isRiskyRegex(pattern: string): boolean {
   interface Group {
     /** Body contains an alternation or a quantifier (recursively) => ambiguous. */
     bodyAmbiguous: boolean;
+    /** Body has a top-level alternation `|` => a variable-length matcher itself. */
+    hasAlternation: boolean;
   }
   const stack: Group[] = [];
   let lastClosed: Group | null = null;
@@ -191,7 +195,7 @@ function isRiskyRegex(pattern: string): boolean {
       continue;
     }
     if (ch === '(') {
-      stack.push({ bodyAmbiguous: false });
+      stack.push({ bodyAmbiguous: false, hasAlternation: false });
       lastClosed = null;
       // Skip a group-modifier prefix so its `?`/`<` are not read as quantifiers:
       // (?:  (?=  (?!  (?<=  (?<!  (?<name>
@@ -216,11 +220,25 @@ function isRiskyRegex(pattern: string): boolean {
       if (closed !== null && closed.bodyAmbiguous) {
         markEnclosingAmbiguous();
       }
+      // (e') an alternation group is itself a variable-length matcher (its
+      // branches can differ in length, e.g. `(a|)` == `a?`, `(aa|a)`), so a
+      // run of them is 2^N single-attempt blowup just like a `?` chain and
+      // must count toward the cap - the vm timeout cannot interrupt it.
+      if (closed !== null && closed.hasAlternation) {
+        variableCount++;
+        if (variableCount > MAX_VARIABLE_QUANTIFIERS) {
+          return true;
+        }
+      }
       lastClosed = closed;
       continue;
     }
     if (ch === '|') {
       markEnclosingAmbiguous(); // an alternation makes the enclosing body ambiguous
+      const top = stack[stack.length - 1];
+      if (top !== undefined) {
+        top.hasAlternation = true;
+      }
       lastClosed = null;
       continue;
     }

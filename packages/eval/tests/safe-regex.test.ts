@@ -74,6 +74,23 @@ describe('safeRegExp', () => {
     expect(() => safeRegExp('a?'.repeat(12))).not.toThrow(); // under the cap
   });
 
+  test('rejects a chain of length-ambiguous alternation groups (a? in disguise)', () => {
+    // `(a|)` == `a?`, `(aa|a)` etc. are variable-length matchers written as
+    // alternations - a run of them is the same 2^N single-attempt blowup and
+    // must count toward the cap even though there is no `?`/`*`/`+`.
+    for (const bad of [
+      '(a|)'.repeat(55) + 'a'.repeat(55),
+      '(aa|a)'.repeat(30) + 'X',
+      '(a|ab)'.repeat(30) + 'c',
+      '(a|b)'.repeat(13),
+    ]) {
+      expect(() => safeRegExp(bad), bad.slice(0, 20)).toThrow(UnsafeRegexError);
+    }
+    // A handful of alternation groups (as in real patterns) stays allowed.
+    expect(() => safeRegExp('(a|b)'.repeat(12))).not.toThrow();
+    expect(() => safeRegExp('(confirm|proceed|pay|go ahead)')).not.toThrow();
+  });
+
   test('rejects bounded quantifiers over ambiguous groups (bounded exponential)', () => {
     for (const bad of [
       '(a?){30}',
