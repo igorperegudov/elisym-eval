@@ -38,30 +38,51 @@ export class UnsafeRegexError extends Error {
 }
 
 /**
- * Reject an unbounded quantifier applied to a group whose body (at any nesting
- * depth) contains an alternation or another unbounded quantifier - the two
- * classic exponential-backtracking families. Escapes and character classes are
- * skipped so `\+`, `[+*|]` etc. are treated as literals.
+ * Sound over-approximation of catastrophic-backtracking risk.
+ *
+ * A pattern matches in worst-case super-linear time only if it can match some
+ * input span in more than one way under a repetition. That requires either:
+ *   (a) two or more unbounded quantifiers (`*`, `+`, `{n,}`) - the polynomial
+ *       family `a*a*b` / `.*.*=` and the nested exponential family `(a+)+`; or
+ *   (b) a single unbounded quantifier applied to a group containing an
+ *       alternation - the exponential family `(a|a)*` / `(a|b)+`; or
+ *   (c) a backreference, whose matching is not linear in general.
+ * A pattern with at most one unbounded quantifier, no quantified alternation
+ * group, and no backreference runs in linear time.
+ *
+ * This REJECTS some safe patterns too (`a*b*` with disjoint alphabets,
+ * `\d+-\d+` separated by a literal): they have >=2 unbounded quantifiers and
+ * are refused conservatively - rewrite with a single quantifier or a character
+ * class. Escapes and character classes are skipped, so `\+`, `[+*|]` are
+ * treated as literals. This is sound against the known ReDoS families without
+ * a heavy native engine; it is a deliberate over-approximation, not a minimal
+ * one.
  */
 function isRiskyRegex(pattern: string): boolean {
   interface Group {
-    /** Body contains an alternation or unbounded quantifier (recursively). */
-    bodyHasRisk: boolean;
+    /** Body contains a top-level alternation (recursively via nested groups). */
+    bodyHasAlternation: boolean;
   }
   const stack: Group[] = [];
   let lastClosed: Group | null = null;
   let inClass = false;
+  let unboundedCount = 0;
 
-  const markEnclosingRisk = (): void => {
+  const markEnclosingAlternation = (): void => {
     const top = stack[stack.length - 1];
     if (top !== undefined) {
-      top.bodyHasRisk = true;
+      top.bodyHasAlternation = true;
     }
   };
 
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i];
     if (ch === '\\') {
+      // A backreference (\1-\9 or \k<name>) is not linear-time in general.
+      const next = pattern[i + 1];
+      if (next !== undefined && (/[1-9]/.test(next) || next === 'k')) {
+        return true;
+      }
       i++; // skip the escaped char
       lastClosed = null;
       continue;
@@ -78,22 +99,20 @@ function isRiskyRegex(pattern: string): boolean {
       continue;
     }
     if (ch === '(') {
-      stack.push({ bodyHasRisk: false });
+      stack.push({ bodyHasAlternation: false });
       lastClosed = null;
       continue;
     }
     if (ch === ')') {
       const closed = stack.pop() ?? null;
-      // Propagate the closed group's risk up to its parent's body.
-      if (closed !== null && closed.bodyHasRisk) {
-        markEnclosingRisk();
+      if (closed !== null && closed.bodyHasAlternation) {
+        markEnclosingAlternation();
       }
       lastClosed = closed;
       continue;
     }
     if (ch === '|') {
-      // An alternation makes the enclosing group ambiguous.
-      markEnclosingRisk();
+      markEnclosingAlternation();
       lastClosed = null;
       continue;
     }
@@ -105,16 +124,18 @@ function isRiskyRegex(pattern: string): boolean {
       (ch === '{' && /^\{\d*,\}/.test(pattern.slice(i)));
 
     if (isUnbounded) {
-      // A quantifier applied directly to a just-closed risky group -> exponential.
-      if (lastClosed !== null && lastClosed.bodyHasRisk) {
+      unboundedCount++;
+      if (unboundedCount >= 2) {
+        return true; // polynomial or nested-exponential family
+      }
+      // Single unbounded quantifier applied to an alternation group -> exponential.
+      if (lastClosed !== null && lastClosed.bodyHasAlternation) {
         return true;
       }
-      // The quantifier itself makes the enclosing group's body risky.
-      markEnclosingRisk();
     }
     if (ch !== '?') {
-      // `?` after a quantifier only makes it lazy; keep lastClosed so `(a+)+?`
-      // is still caught. Any other token ends the "just closed a group" state.
+      // `?` only makes a preceding quantifier lazy; keep lastClosed so
+      // `(a|a)*?` is still caught. Any other token ends the just-closed state.
       lastClosed = null;
     }
   }
@@ -144,9 +165,9 @@ export function safeRegExp(pattern: string, flags = ''): RegExp {
   validateFlags(flags);
   if (isRiskyRegex(pattern)) {
     throw new UnsafeRegexError(
-      `regex pattern "${pattern}" has an unbounded quantifier over an ambiguous group ` +
-        '(nested quantifier or alternation) - catastrophic-backtracking risk; ' +
-        'rewrite quantified alternations as a character class',
+      `regex pattern "${pattern}" carries catastrophic-backtracking risk ` +
+        '(>=2 unbounded quantifiers, a quantified alternation group, or a backreference); ' +
+        'use at most one unbounded quantifier and a character class instead of a quantified alternation',
     );
   }
   return new RegExp(pattern, flags);
