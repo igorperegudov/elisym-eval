@@ -9,14 +9,16 @@ Benchmarks evaluate what an agent says. This harness evaluates what an agent **d
 | [`@elisym/eval`](packages/eval)                               | Core harness: schema, runner, assertions, dataset |
 | [`@elisym/eval-adapter-solana`](packages/eval-adapter-solana) | Solana implementation of the PaymentAdapter       |
 
-See [`packages/eval/README.md`](packages/eval/README.md) for the quickstart.
+See [`packages/eval/README.md`](packages/eval/README.md) for the quickstart, the deterministic-first philosophy and the bundled payments-v0 dataset (23 cases + 7 injection-attacked variants, zero judge cases).
 
 ## Development
 
 ```sh
 bun install
-bun run qa   # build + test + typecheck + lint + format check + spell check
+bun run qa   # build + test + typecheck + lint + format check + spell check + dataset freshness
 ```
+
+Live devnet tests are a separate task (`bun run test:live`) and never run in PR CI. Releases: see [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## License
 
