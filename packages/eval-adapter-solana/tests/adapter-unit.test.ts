@@ -233,6 +233,49 @@ describe('SolanaPaymentAdapter', () => {
     });
   });
 
+  test('SECURITY: concurrent same-idempotencyKey calls cannot both settle (TOCTOU)', async () => {
+    // The reservation is now synchronous (before the broadcast await), so the
+    // second concurrent call short-circuits even though the maps are only
+    // finalized after send resolves.
+    const { adapter, state } = makeFakes();
+    const quote = await adapter.getQuote({ payee: 'merchant', assetId: 'sol', value: 10_000n });
+    const results = await Promise.allSettled([
+      adapter.executePayment({ quote, payer: 'payer', idempotencyKey: 'k1' }),
+      adapter.executePayment({ quote, payer: 'payer', idempotencyKey: 'k1' }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      code: 'duplicate_payment',
+    });
+    expect(state.sendCalls).toHaveLength(1); // exactly one broadcast
+    expect((await adapter.readLedger()).transfers).toHaveLength(1);
+  });
+
+  test('SECURITY: concurrent same-invoice calls settle exactly once', async () => {
+    const { adapter } = makeFakes();
+    const q1 = await adapter.getQuote({
+      payee: 'merchant',
+      assetId: 'sol',
+      value: 10_000n,
+      invoiceId: 'inv-9',
+    });
+    const q2 = await adapter.getQuote({
+      payee: 'merchant',
+      assetId: 'sol',
+      value: 10_000n,
+      invoiceId: 'inv-9',
+    });
+    const results = await Promise.allSettled([
+      adapter.executePayment({ quote: q1, payer: 'payer' }),
+      adapter.executePayment({ quote: q2, payer: 'payer' }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    expect((await adapter.readLedger()).transfers).toHaveLength(1);
+  });
+
   test('getBalances and readLedger report balances for known wallets', async () => {
     const { adapter } = makeFakes();
     const quote = await adapter.getQuote({ payee: 'merchant', assetId: 'sol', value: 10_000n });

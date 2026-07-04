@@ -8,6 +8,20 @@ export interface OpenAICompatibleJudgeOptions {
   apiKey?: string;
   maxTokens?: number;
   headers?: Record<string, string>;
+  /** Request timeout so a slow/hostile endpoint cannot hang the runner. Default 60s. */
+  timeoutMs?: number;
+}
+
+/** Default judge request timeout (ms). */
+export const DEFAULT_JUDGE_TIMEOUT_MS = 60_000;
+
+/**
+ * Combine an optional caller signal with a default timeout so no judge request
+ * can hang the runner indefinitely.
+ */
+export function withTimeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal !== undefined ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 interface ChatCompletionResponse {
@@ -40,7 +54,10 @@ export function createOpenAICompatibleJudge(options: OpenAICompatibleJudgeOption
             : {}),
           max_tokens: completeOptions?.maxTokens ?? options.maxTokens ?? 1024,
         }),
-        ...(completeOptions?.signal !== undefined ? { signal: completeOptions.signal } : {}),
+        signal: withTimeoutSignal(
+          options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS,
+          completeOptions?.signal,
+        ),
       });
       if (!response.ok) {
         const body = await response.text();

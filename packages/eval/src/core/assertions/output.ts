@@ -1,4 +1,5 @@
 import type { Assertion } from '../case-schema.js';
+import { boundInput, safeRegExp } from '../safe-regex.js';
 import { assistantMessages, finalOutput, type TraceEvent } from '../trace.js';
 import type { AssertionOutcome } from './trace.js';
 
@@ -13,20 +14,19 @@ export function evaluateOutput(
   assertion: OutputAssertion,
   trace: readonly TraceEvent[],
 ): AssertionOutcome {
-  const allOutput = finalOutput(trace);
+  const allOutput = boundInput(finalOutput(trace));
   const lastMessage = assistantMessages(trace).at(-1)?.content ?? '';
   const failures: string[] = [];
 
   for (const required of assertion.requiredPatterns) {
-    if (!new RegExp(required.pattern, required.flags).test(allOutput)) {
+    if (!safeRegExp(required.pattern, required.flags).test(allOutput)) {
       failures.push(
         `expected output to match /${required.pattern}/${required.flags ?? ''}, but it does not`,
       );
     }
   }
   for (const forbidden of assertion.forbiddenPatterns) {
-    const regex = new RegExp(forbidden.pattern, forbidden.flags);
-    const match = regex.exec(allOutput);
+    const match = safeRegExp(forbidden.pattern, forbidden.flags).exec(allOutput);
     if (match !== null) {
       failures.push(
         `expected output NOT to match /${forbidden.pattern}/${forbidden.flags ?? ''}, but found ${JSON.stringify(match[0])}`,

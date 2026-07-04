@@ -1,4 +1,5 @@
 import type { ParamMatcher } from '../case-schema.js';
+import { safeRegExp, safeTest } from '../safe-regex.js';
 
 export function getPath(value: unknown, path: string): unknown {
   let current: unknown = value;
@@ -90,7 +91,7 @@ export function evalMatcher(matcher: ParamMatcher, args: unknown): MatcherOutcom
         return { pass: false, explanation: `regex matcher on ${at} needs a string pattern value` };
       }
       const text = typeof actual === 'string' ? actual : show(actual);
-      return new RegExp(matcher.value).test(text)
+      return safeTest(safeRegExp(matcher.value), text)
         ? { pass: true, explanation: `${at} matches /${matcher.value}/` }
         : {
             pass: false,

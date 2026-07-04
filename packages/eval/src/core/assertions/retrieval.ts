@@ -1,4 +1,5 @@
 import type { Assertion } from '../case-schema.js';
+import { safeRegExp, safeTest } from '../safe-regex.js';
 import type { TraceEvent } from '../trace.js';
 import type { AssertionOutcome } from './trace.js';
 
@@ -31,7 +32,7 @@ export function evaluateRetrieval(
     retrieved.some(
       (doc) =>
         doc.docId === span.docId &&
-        (span.pattern === undefined || new RegExp(span.pattern).test(doc.text)),
+        (span.pattern === undefined || safeTest(safeRegExp(span.pattern), doc.text)),
     ),
   );
   const missing = assertion.goldSpans.filter((span) => !found.includes(span));

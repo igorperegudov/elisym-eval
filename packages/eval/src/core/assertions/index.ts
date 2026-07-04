@@ -80,7 +80,18 @@ export async function evaluateAssertions(
   const results: EvaluatedAssertion[] = [];
   for (let i = 0; i < assertions.length; i++) {
     const assertion = assertions[i];
-    const outcome = await evaluateAssertion(assertion, ctx);
+    // Fault isolation: a throw from one evaluator (e.g. a rejected unsafe
+    // regex, or a malformed pattern) becomes a clean failing assertion for
+    // THIS case only, never aborting the rest of the dataset run.
+    let outcome: AssertionOutcome;
+    try {
+      outcome = await evaluateAssertion(assertion, ctx);
+    } catch (err) {
+      outcome = {
+        pass: false,
+        explanation: `assertion evaluation failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
     results.push({
       ...outcome,
       index: i,

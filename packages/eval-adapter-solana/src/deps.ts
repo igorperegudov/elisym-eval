@@ -39,11 +39,19 @@ export async function createSolanaAdapter(
   const rpcSubscriptions = createSolanaRpcSubscriptions(rpcUrl.replace(/^http/, 'ws'));
   const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
 
-  const secretBytes =
-    typeof config.payerSecretKey === 'string'
-      ? new Uint8Array(getBase58Encoder().encode(config.payerSecretKey))
-      : config.payerSecretKey;
-  const signer = await createKeyPairSignerFromBytes(secretBytes);
+  // Decode + load the signing key inside a scrubbed try/catch: an underlying
+  // decoder error can embed the offending input (the secret key itself) in its
+  // message, so never let the raw error propagate.
+  let signer;
+  try {
+    const secretBytes =
+      typeof config.payerSecretKey === 'string'
+        ? new Uint8Array(getBase58Encoder().encode(config.payerSecretKey))
+        : config.payerSecretKey;
+    signer = await createKeyPairSignerFromBytes(secretBytes);
+  } catch {
+    throw new Error('failed to load payer secret key: invalid key material');
+  }
 
   const strategy = new SolanaPaymentStrategy();
   const programId = getProtocolProgramId('devnet');

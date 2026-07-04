@@ -1,5 +1,6 @@
 import type { AgentSession, ToolResultInput } from './agent.js';
 import type { Scenario } from './case-schema.js';
+import { safeRegExp, safeTest } from './safe-regex.js';
 import type { ToolExecutor } from './tools.js';
 import { assistantMessages, type TraceRecorder } from './trace.js';
 
@@ -30,8 +31,8 @@ export async function runScriptedScenario(
       userMessage = step.content;
     } else {
       const last = assistantMessages(trace.events).at(-1);
-      const regex = new RegExp(step.pattern, step.flags);
-      if (last !== undefined && regex.test(last.content)) {
+      const regex = safeRegExp(step.pattern, step.flags);
+      if (last !== undefined && safeTest(regex, last.content)) {
         userMessage = step.then;
       } else if (step.else !== undefined) {
         userMessage = step.else;

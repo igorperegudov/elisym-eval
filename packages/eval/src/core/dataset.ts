@@ -24,6 +24,9 @@ function formatZodIssues(error: {
  * Parse a JSONL dataset. Never throws: malformed lines, schema violations and
  * duplicate ids are collected as issues with 1-based line numbers.
  */
+/** Cap a single JSONL line so a hostile dataset cannot OOM the parser (4 MB). */
+const MAX_LINE_LENGTH = 4 * 1024 * 1024;
+
 export function parseDataset(jsonl: string): ParseDatasetResult {
   const cases: EvalCase[] = [];
   const issues: DatasetIssue[] = [];
@@ -36,6 +39,11 @@ export function parseDataset(jsonl: string): ParseDatasetResult {
       continue;
     }
     const line = i + 1;
+
+    if (raw.length > MAX_LINE_LENGTH) {
+      issues.push({ line, message: `line too long (${raw.length} > ${MAX_LINE_LENGTH} bytes)` });
+      continue;
+    }
 
     let json: unknown;
     try {

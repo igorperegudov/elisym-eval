@@ -49,6 +49,16 @@ export {
 } from './core/dataset.js';
 export { EvalConfigError, NotImplementedError } from './core/errors.js';
 export {
+  boundInput,
+  MAX_PATTERN_LENGTH,
+  MAX_REGEX_INPUT_LENGTH,
+  safeExec,
+  safeMatchAll,
+  safeRegExp,
+  safeTest,
+  UnsafeRegexError,
+} from './core/safe-regex.js';
+export {
   calibrateJudge,
   CalibrationRowSchema,
   cohensKappa,

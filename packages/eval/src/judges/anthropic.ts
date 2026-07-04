@@ -1,4 +1,5 @@
 import type { ChatMessage, CompleteOptions, LLMClient } from '../core/llm-client.js';
+import { DEFAULT_JUDGE_TIMEOUT_MS, withTimeoutSignal } from './openai-compatible.js';
 
 export interface AnthropicJudgeOptions {
   model: string;
@@ -6,6 +7,8 @@ export interface AnthropicJudgeOptions {
   apiKey?: string;
   baseUrl?: string;
   maxTokens?: number;
+  /** Request timeout so a slow endpoint cannot hang the runner. Default 60s. */
+  timeoutMs?: number;
 }
 
 interface MessagesResponse {
@@ -48,7 +51,10 @@ export function createAnthropicJudge(options: AnthropicJudgeOptions): LLMClient 
             : {}),
           max_tokens: completeOptions?.maxTokens ?? options.maxTokens ?? 1024,
         }),
-        ...(completeOptions?.signal !== undefined ? { signal: completeOptions.signal } : {}),
+        signal: withTimeoutSignal(
+          options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS,
+          completeOptions?.signal,
+        ),
       });
       if (!response.ok) {
         const body = await response.text();

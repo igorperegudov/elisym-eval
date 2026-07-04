@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { zAmount } from './bigint-json.js';
 import { CanonicalErrorCodeSchema } from './canonical-codes.js';
+import { MAX_PATTERN_LENGTH } from './safe-regex.js';
+
+/**
+ * A regex pattern authored in a case. Length-capped at parse time; the runtime
+ * (safe-regex) additionally rejects nested-quantifier ReDoS shapes.
+ */
+const RegexPatternSchema = z.string().min(1).max(MAX_PATTERN_LENGTH);
+/** Regex flags restricted to the standard set (rejects malformed-flags crashes). */
+const RegexFlagsSchema = z.string().regex(/^[dgimsuy]*$/, 'invalid regex flags');
+
+/** Longest a mock ledger delay injection may stall a run (30s). */
+const MAX_INJECTED_DELAY_MS = 30_000;
 
 // --- Environment -------------------------------------------------------------
 
@@ -34,7 +46,7 @@ export const FailureInjectionSchema = z.discriminatedUnion('behavior', [
     behavior: z.literal('delay'),
     on: z.enum(['getQuote', 'executePayment', 'getPaymentStatus']),
     nth: z.number().int().positive(),
-    delayMs: z.number().int().positive(),
+    delayMs: z.number().int().positive().max(MAX_INJECTED_DELAY_MS),
   }),
   z.object({
     behavior: z.literal('mutateQuote'),
@@ -107,8 +119,8 @@ export const ScriptedStepSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('branch'),
     /** Regex tested against the agent's last message. */
-    pattern: z.string().min(1),
-    flags: z.string().optional(),
+    pattern: RegexPatternSchema,
+    flags: RegexFlagsSchema.optional(),
     /** Reply sent when the pattern matches. */
     then: z.string().min(1),
     /** Reply when it does not match; omitted = conversation ends. */
@@ -162,8 +174,8 @@ export const EventRefSchema = z.discriminatedUnion('event', [
     tool: z.string().min(1),
     where: z.array(ParamMatcherSchema).optional(),
   }),
-  z.object({ event: z.literal('user.message'), matching: z.string().min(1) }),
-  z.object({ event: z.literal('assistant.message'), matching: z.string().min(1) }),
+  z.object({ event: z.literal('user.message'), matching: RegexPatternSchema }),
+  z.object({ event: z.literal('assistant.message'), matching: RegexPatternSchema }),
 ]);
 export type EventRef = z.infer<typeof EventRefSchema>;
 
@@ -231,8 +243,8 @@ export const PaymentCheckSchema = z.discriminatedUnion('kind', [
 export type PaymentCheck = z.infer<typeof PaymentCheckSchema>;
 
 const PatternSchema = z.object({
-  pattern: z.string().min(1),
-  flags: z.string().optional(),
+  pattern: RegexPatternSchema,
+  flags: RegexFlagsSchema.optional(),
 });
 
 export const AssertionSchema = z.discriminatedUnion('type', [
@@ -260,7 +272,7 @@ export const AssertionSchema = z.discriminatedUnion('type', [
         z.object({
           docId: z.string().min(1),
           /** Optional regex the doc text must match; omit = docId presence is enough. */
-          pattern: z.string().optional(),
+          pattern: RegexPatternSchema.optional(),
         }),
       )
       .min(1),

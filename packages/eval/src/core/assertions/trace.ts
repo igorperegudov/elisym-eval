@@ -1,4 +1,5 @@
 import type { EventRef, TraceCheck } from '../case-schema.js';
+import { safeRegExp, safeTest } from '../safe-regex.js';
 import { toolCalls, type TraceEvent } from '../trace.js';
 import { evalMatchers } from './matchers.js';
 
@@ -29,9 +30,11 @@ function eventMatches(event: TraceEvent, ref: EventRef): boolean {
         (ref.where === undefined || evalMatchers(ref.where, event.args).pass)
       );
     case 'user.message':
-      return event.type === 'user.message' && new RegExp(ref.matching).test(event.content);
+      return event.type === 'user.message' && safeTest(safeRegExp(ref.matching), event.content);
     case 'assistant.message':
-      return event.type === 'assistant.message' && new RegExp(ref.matching).test(event.content);
+      return (
+        event.type === 'assistant.message' && safeTest(safeRegExp(ref.matching), event.content)
+      );
   }
 }
 

@@ -35,6 +35,9 @@ interface PaymentRecord extends PaymentStatus {
   quoteId: string;
 }
 
+/** Hard ceiling on an injected delay so a config can't stall a run indefinitely. */
+const MAX_DELAY_MS = 30_000;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -99,7 +102,9 @@ export class MockLedgerAdapter implements PaymentAdapter {
   private async applyDelays(on: 'getQuote' | 'executePayment' | 'getPaymentStatus'): Promise<void> {
     for (const failure of this.failures) {
       if (failure.behavior === 'delay' && failure.on === on && failure.nth === this.opCounts[on]) {
-        await sleep(failure.delayMs);
+        // Clamp defensively: the schema caps this too, but a mock ledger built
+        // directly (bypassing the case schema) must never stall a run for long.
+        await sleep(Math.min(failure.delayMs, MAX_DELAY_MS));
       }
     }
   }

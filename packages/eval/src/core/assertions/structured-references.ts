@@ -1,4 +1,5 @@
 import type { Assertion } from '../case-schema.js';
+import { safeMatchAll, safeRegExp } from '../safe-regex.js';
 import { finalOutput, type TraceEvent } from '../trace.js';
 import type { AssertionOutcome } from './trace.js';
 
@@ -27,10 +28,11 @@ export function evaluateStructuredReferences(
   trace: readonly TraceEvent[],
 ): AssertionOutcome {
   const output = finalOutput(trace);
-  const regex = new RegExp(assertion.extract.pattern, `${assertion.extract.flags ?? ''}g`);
+  const flags = assertion.extract.flags ?? '';
+  const regex = safeRegExp(assertion.extract.pattern, flags.includes('g') ? flags : `${flags}g`);
 
   const cited = new Set<string>();
-  for (const match of output.matchAll(regex)) {
+  for (const match of safeMatchAll(regex, output)) {
     cited.add(match[1] ?? match[0]);
   }
 

@@ -80,6 +80,11 @@ export class SolanaPaymentAdapter implements PaymentAdapter {
   private readonly payments = new Map<string, PaymentStatus>();
   private readonly idempotency = new Map<string, PaymentResult>();
   private readonly settledInvoices = new Map<string, string>();
+  // Reserved synchronously before broadcast so concurrent callers with the
+  // same idempotencyKey / invoiceId cannot both pass the guard and double-pay
+  // (the permanent maps are only written after the async send resolves).
+  private readonly inFlightKeys = new Set<string>();
+  private readonly inFlightInvoices = new Set<string>();
   private readonly transfers: Transfer[] = [];
   private readonly knownWallets = new Set<string>();
 
@@ -143,6 +148,11 @@ export class SolanaPaymentAdapter implements PaymentAdapter {
       if (replay !== undefined) {
         return replay;
       }
+      if (this.inFlightKeys.has(idempotencyKey)) {
+        throw new DuplicatePaymentError(
+          `idempotencyKey ${idempotencyKey} is already being executed`,
+        );
+      }
     }
 
     const stored = this.quotes.get(quote.quoteId);
@@ -158,23 +168,51 @@ export class SolanaPaymentAdapter implements PaymentAdapter {
       this.recordFailure(quote.quoteId, error.code);
       throw error;
     }
-    if (stored.quote.invoiceId !== undefined && this.settledInvoices.has(stored.quote.invoiceId)) {
+    const invoiceId = stored.quote.invoiceId;
+    if (
+      invoiceId !== undefined &&
+      (this.settledInvoices.has(invoiceId) || this.inFlightInvoices.has(invoiceId))
+    ) {
+      const settledBy = this.settledInvoices.get(invoiceId);
       const error = new DuplicatePaymentError(
-        `invoice ${stored.quote.invoiceId} was already paid by transfer ${this.settledInvoices.get(stored.quote.invoiceId)}`,
+        settledBy !== undefined
+          ? `invoice ${invoiceId} was already paid by transfer ${settledBy}`
+          : `invoice ${invoiceId} is already being executed`,
       );
       this.recordFailure(quote.quoteId, error.code);
       throw error;
+    }
+
+    // Reserve BEFORE the broadcast await so a concurrent caller short-circuits.
+    if (idempotencyKey !== undefined) {
+      this.inFlightKeys.add(idempotencyKey);
+    }
+    if (invoiceId !== undefined) {
+      this.inFlightInvoices.add(invoiceId);
     }
 
     let signature: string;
     try {
       ({ signature } = await this.deps.sendPayment(stored.request));
     } catch (err) {
+      // Broadcast failed: release the reservation so a legitimate retry works.
+      if (idempotencyKey !== undefined) {
+        this.inFlightKeys.delete(idempotencyKey);
+      }
+      if (invoiceId !== undefined) {
+        this.inFlightInvoices.delete(invoiceId);
+      }
       const mapped = mapSolanaError(err);
       this.recordFailure(quote.quoteId, mapped.code);
       throw mapped;
     }
 
+    if (invoiceId !== undefined) {
+      this.inFlightInvoices.delete(invoiceId);
+    }
+    if (idempotencyKey !== undefined) {
+      this.inFlightKeys.delete(idempotencyKey);
+    }
     return this.recordSettlement(stored, payer, signature, idempotencyKey);
   }
 
