@@ -1,9 +1,12 @@
 import type { Assertion, CaseJudgeConfig } from '../case-schema.js';
-import { EvalConfigError } from '../errors.js';
 import type { LLMClient } from '../llm-client.js';
+import type { Rubric } from '../rubric.js';
 import type { TraceEvent } from '../trace.js';
+import { evaluateJudge } from './judge.js';
 import { evaluateOutput } from './output.js';
 import { evaluatePaymentCheck } from './payment.js';
+import { evaluateRetrieval } from './retrieval.js';
+import { evaluateStructuredReferences } from './structured-references.js';
 import { evaluateTraceCheck, type AssertionOutcome } from './trace.js';
 
 export type { AssertionOutcome } from './trace.js';
@@ -31,6 +34,8 @@ export interface PaymentSnapshot {
 export interface JudgeContext {
   defaultClient?: LLMClient;
   namedClients: Record<string, LLMClient>;
+  /** Keyed by rubricKey(id, version). */
+  rubrics?: Record<string, Rubric>;
   caseConfig?: CaseJudgeConfig;
 }
 
@@ -60,11 +65,11 @@ export async function evaluateAssertion(
     case 'payment':
       return evaluatePaymentCheck(assertion.check, ctx.trace, ctx.payment);
     case 'structuredReferences':
+      return evaluateStructuredReferences(assertion, ctx.trace);
     case 'retrieval':
+      return evaluateRetrieval(assertion, ctx.trace);
     case 'judge':
-      throw new EvalConfigError(
-        `assertion type "${assertion.type}" is not wired into the runner yet`,
-      );
+      return evaluateJudge(assertion, ctx.trace, ctx.judge);
   }
 }
 

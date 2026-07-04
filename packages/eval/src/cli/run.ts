@@ -15,14 +15,17 @@ import {
   type RunnerConfig,
 } from '../core/runner.js';
 import { createMockAdapterFactory } from '../payments/index.js';
+import { createJudgeFromFlags, loadRubricsFile, type JudgeFlags } from './judges.js';
 
-export interface RunCliOptions {
+export interface RunCliOptions extends JudgeFlags {
   /** Module path to load, or an AgentUnderTest instance for programmatic use. */
   agent: string | AgentUnderTest;
   mode: RunMode;
   runs: number;
   concurrency: number;
   filter?: string;
+  /** Path to a rubrics JSON file for judge assertions. */
+  rubrics?: string;
   reportJson?: string;
   reportMd?: string;
   failFast: boolean;
@@ -83,11 +86,14 @@ export async function runCli(
     }
   }
 
+  const judge = createJudgeFromFlags(options);
   const config: RunnerConfig = {
     agent,
     mode: options.mode,
     runsPerCase: options.runs,
     concurrency: options.concurrency,
+    ...(judge !== undefined ? { judge } : {}),
+    ...(options.rubrics !== undefined ? { rubrics: await loadRubricsFile(options.rubrics) } : {}),
   };
 
   // Sequential when fail-fast so we can stop at the first failure.

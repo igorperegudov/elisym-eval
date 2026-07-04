@@ -52,6 +52,36 @@
         "types": "./dist/payments.d.cts",
         "default": "./dist/payments.cjs"
       }
+    },
+    "./judges/anthropic": {
+      "import": {
+        "types": "./dist/judges/anthropic.d.ts",
+        "default": "./dist/judges/anthropic.js"
+      },
+      "require": {
+        "types": "./dist/judges/anthropic.d.cts",
+        "default": "./dist/judges/anthropic.cjs"
+      }
+    },
+    "./judges/openai": {
+      "import": {
+        "types": "./dist/judges/openai.d.ts",
+        "default": "./dist/judges/openai.js"
+      },
+      "require": {
+        "types": "./dist/judges/openai.d.cts",
+        "default": "./dist/judges/openai.cjs"
+      }
+    },
+    "./judges/openai-compatible": {
+      "import": {
+        "types": "./dist/judges/openai-compatible.d.ts",
+        "default": "./dist/judges/openai-compatible.js"
+      },
+      "require": {
+        "types": "./dist/judges/openai-compatible.d.cts",
+        "default": "./dist/judges/openai-compatible.cjs"
+      }
     }
   },
   "scripts": {

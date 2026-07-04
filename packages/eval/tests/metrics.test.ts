@@ -105,7 +105,7 @@ describe('computeMetrics', () => {
         run('case-cite', [
           assertion({
             type: 'structuredReferences',
-            details: { truePositives: 3, falsePositives: 1, falseNegatives: 1 },
+            details: { citedCorrect: 3, citedTotal: 4, groupsCovered: 3, groupsTotal: 4 },
           }),
         ]),
       ],

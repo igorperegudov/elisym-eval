@@ -38,18 +38,20 @@ function rate(numerator: number, denominator: number): number {
 }
 
 interface CitationCounts {
-  truePositives: number;
-  falsePositives: number;
-  falseNegatives: number;
+  citedCorrect: number;
+  citedTotal: number;
+  groupsCovered: number;
+  groupsTotal: number;
 }
 
 function isCitationCounts(details: unknown): details is CitationCounts {
   return (
     typeof details === 'object' &&
     details !== null &&
-    typeof (details as CitationCounts).truePositives === 'number' &&
-    typeof (details as CitationCounts).falsePositives === 'number' &&
-    typeof (details as CitationCounts).falseNegatives === 'number'
+    typeof (details as CitationCounts).citedCorrect === 'number' &&
+    typeof (details as CitationCounts).citedTotal === 'number' &&
+    typeof (details as CitationCounts).groupsCovered === 'number' &&
+    typeof (details as CitationCounts).groupsTotal === 'number'
   );
 }
 
@@ -109,7 +111,12 @@ export function computeMetrics(results: readonly CaseResult[]): Metrics {
   }
 
   let citationCases = 0;
-  const totals: CitationCounts = { truePositives: 0, falsePositives: 0, falseNegatives: 0 };
+  const totals: CitationCounts = {
+    citedCorrect: 0,
+    citedTotal: 0,
+    groupsCovered: 0,
+    groupsTotal: 0,
+  };
   for (const result of evaluated) {
     const run = result.runs[0];
     if (run === undefined) {
@@ -118,9 +125,10 @@ export function computeMetrics(results: readonly CaseResult[]): Metrics {
     let counted = false;
     for (const assertion of run.assertions) {
       if (assertion.type === 'structuredReferences' && isCitationCounts(assertion.details)) {
-        totals.truePositives += assertion.details.truePositives;
-        totals.falsePositives += assertion.details.falsePositives;
-        totals.falseNegatives += assertion.details.falseNegatives;
+        totals.citedCorrect += assertion.details.citedCorrect;
+        totals.citedTotal += assertion.details.citedTotal;
+        totals.groupsCovered += assertion.details.groupsCovered;
+        totals.groupsTotal += assertion.details.groupsTotal;
         counted = true;
       }
     }
@@ -130,8 +138,9 @@ export function computeMetrics(results: readonly CaseResult[]): Metrics {
   }
   if (citationCases > 0) {
     metrics.citations = {
-      microPrecision: rate(totals.truePositives, totals.truePositives + totals.falsePositives),
-      microRecall: rate(totals.truePositives, totals.truePositives + totals.falseNegatives),
+      // an agent citing nothing has perfect precision but zero recall
+      microPrecision: totals.citedTotal === 0 ? 1 : rate(totals.citedCorrect, totals.citedTotal),
+      microRecall: rate(totals.groupsCovered, totals.groupsTotal),
       casesEvaluated: citationCases,
     };
   }

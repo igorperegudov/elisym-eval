@@ -7,7 +7,9 @@ import {
 } from './assertions/index.js';
 import type { Assertion, Environment, EvalCase } from './case-schema.js';
 import { EvalConfigError, NotImplementedError } from './errors.js';
+import type { JudgeVerdict } from './judge-core.js';
 import type { LLMClient } from './llm-client.js';
+import type { Rubric } from './rubric.js';
 import { runScriptedScenario } from './scenario-scripted.js';
 import { composeExecutors, createMockToolExecutor, type ToolExecutor } from './tools.js';
 import { TraceRecorder, type TraceEvent } from './trace.js';
@@ -22,6 +24,8 @@ export interface RunnerConfig {
   judge?: LLMClient;
   /** Named judges for per-case judgeRef overrides. */
   judges?: Record<string, LLMClient>;
+  /** Rubric registry keyed by rubricKey(id, version). */
+  rubrics?: Record<string, Rubric>;
   /** k for pass^k: run each case k times, pass only if all runs pass. Default 1. */
   runsPerCase?: number;
   /** Cases evaluated concurrently in runDataset. Default 4. */
@@ -38,6 +42,8 @@ export interface CaseRunResult {
   pass: boolean;
   assertions: EvaluatedAssertion[];
   trace: TraceEvent[];
+  /** Every judge verdict from this run - always carries modelId + rubric id/version. */
+  judgeVerdicts?: JudgeVerdict[];
   /** Infrastructure/agent error that ended the run early, if any. */
   error?: string;
 }
@@ -137,12 +143,17 @@ async function runOnce(
   }
 
   const assertions = await evaluateAssertions(evalCase.assertions, ctx);
+  const judgeVerdicts = assertions
+    .filter((a) => a.type === 'judge')
+    .map((a) => a.details)
+    .filter((d): d is JudgeVerdict => typeof d === 'object' && d !== null && 'verdict' in d);
   return {
     caseId: evalCase.id,
     runIndex,
     pass: assertions.every((a) => a.pass),
     assertions,
     trace: [...trace.events],
+    ...(judgeVerdicts.length > 0 ? { judgeVerdicts } : {}),
     ...(runError !== undefined ? { error: runError } : {}),
   };
 }
@@ -154,6 +165,7 @@ function buildJudgeContext(evalCase: EvalCase, config: RunnerConfig): AssertionC
   return {
     defaultClient: config.judge,
     namedClients: config.judges ?? {},
+    rubrics: config.rubrics ?? {},
     caseConfig: evalCase.judge,
   };
 }

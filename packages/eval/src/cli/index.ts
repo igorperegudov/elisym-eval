@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { calibrateCli } from './calibrate.js';
 import { runCli } from './run.js';
 import { formatValidateReport, validateFiles } from './validate.js';
 
@@ -47,6 +48,10 @@ program
   .option('--filter <glob>', 'only run cases whose id or tag matches the glob')
   .option('--report-json <path>', 'write the machine-readable JSON report here')
   .option('--report-md <path>', 'write the human-readable markdown report here')
+  .option('--judge <provider>', 'default judge: anthropic | openai | openai-compatible')
+  .option('--judge-model <id>', 'model id for the judge')
+  .option('--judge-base-url <url>', 'endpoint for openai-compatible / custom judges')
+  .option('--rubrics <file.json>', 'rubrics file for judge assertions')
   .option('--fail-fast', 'stop at the first failing case', false)
   .action(
     safe(
@@ -60,6 +65,10 @@ program
           filter?: string;
           reportJson?: string;
           reportMd?: string;
+          judge?: string;
+          judgeModel?: string;
+          judgeBaseUrl?: string;
+          rubrics?: string;
           failFast: boolean;
         },
       ) => {
@@ -74,9 +83,54 @@ program
           ...(options.filter !== undefined ? { filter: options.filter } : {}),
           ...(options.reportJson !== undefined ? { reportJson: options.reportJson } : {}),
           ...(options.reportMd !== undefined ? { reportMd: options.reportMd } : {}),
+          ...(options.judge !== undefined ? { judge: options.judge } : {}),
+          ...(options.judgeModel !== undefined ? { judgeModel: options.judgeModel } : {}),
+          ...(options.judgeBaseUrl !== undefined ? { judgeBaseUrl: options.judgeBaseUrl } : {}),
+          ...(options.rubrics !== undefined ? { rubrics: options.rubrics } : {}),
           failFast: options.failFast,
         });
         process.exit(code);
+      },
+    ),
+  );
+
+program
+  .command('calibrate')
+  .description("Run a judge over a human-labeled set and report agreement % + Cohen's kappa")
+  .argument('<labeled.jsonl>', 'JSONL with {id, input, output, humanVerdict} rows')
+  .requiredOption('--judge <provider>', 'anthropic | openai | openai-compatible')
+  .requiredOption('--judge-model <id>', 'model id for the judge')
+  .option('--judge-base-url <url>', 'endpoint for openai-compatible / custom judges')
+  .requiredOption('--rubric <id>', 'rubric id or id@version to calibrate against')
+  .requiredOption('--rubrics <file.json>', 'rubrics file')
+  .option('--scale <scale>', 'binary | ternary', 'binary')
+  .option('--report-json <path>', 'write the full calibration report here')
+  .action(
+    safe(
+      async (
+        labeledFile: string,
+        options: {
+          judge: string;
+          judgeModel: string;
+          judgeBaseUrl?: string;
+          rubric: string;
+          rubrics: string;
+          scale: string;
+          reportJson?: string;
+        },
+      ) => {
+        if (options.scale !== 'binary' && options.scale !== 'ternary') {
+          throw new Error(`invalid --scale ${options.scale}`);
+        }
+        await calibrateCli(labeledFile, {
+          judge: options.judge,
+          judgeModel: options.judgeModel,
+          ...(options.judgeBaseUrl !== undefined ? { judgeBaseUrl: options.judgeBaseUrl } : {}),
+          rubric: options.rubric,
+          rubrics: options.rubrics,
+          scale: options.scale,
+          ...(options.reportJson !== undefined ? { reportJson: options.reportJson } : {}),
+        });
       },
     ),
   );

@@ -5,6 +5,9 @@ export default defineConfig([
     entry: {
       index: 'src/index.ts',
       payments: 'src/payments/index.ts',
+      'judges/anthropic': 'src/judges/anthropic.ts',
+      'judges/openai': 'src/judges/openai.ts',
+      'judges/openai-compatible': 'src/judges/openai-compatible.ts',
     },
     format: ['esm', 'cjs'],
     dts: true,

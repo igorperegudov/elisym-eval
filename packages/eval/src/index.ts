@@ -48,6 +48,23 @@ export {
   type ParseDatasetResult,
 } from './core/dataset.js';
 export { EvalConfigError, NotImplementedError } from './core/errors.js';
+export {
+  calibrateJudge,
+  CalibrationRowSchema,
+  cohensKappa,
+  parseCalibrationSet,
+  type CalibrationReport,
+  type CalibrationRow,
+  type CalibrationRowResult,
+} from './core/calibration.js';
+export { runJudge, type JudgeVerdict } from './core/judge-core.js';
+export {
+  findRubric,
+  rubricKey,
+  SCALE_LABELS,
+  type JudgeScale,
+  type Rubric,
+} from './core/rubric.js';
 export type {
   AgentSession,
   AgentSessionInit,
