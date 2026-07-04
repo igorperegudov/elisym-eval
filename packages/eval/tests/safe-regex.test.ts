@@ -70,6 +70,15 @@ describe('safeRegExp', () => {
     }
   });
 
+  test('rejects huge bounded repetition counts (quadratic scanning)', () => {
+    for (const bad of ['a{999999}', '(a){999999}', 'a{1001}', 'x{0,5000}', 'a{9999999999}']) {
+      expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
+    }
+    for (const ok of ['a{1000}', '\\d{4}', '(ab){1000}', 'a{0,1000}']) {
+      expect(() => safeRegExp(ok), ok).not.toThrow();
+    }
+  });
+
   test('allows non-ambiguous quantified groups, group modifiers and bounded repeats', () => {
     for (const ok of [
       '(a|b)',

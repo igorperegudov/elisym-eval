@@ -25,6 +25,13 @@
 
 export const MAX_PATTERN_LENGTH = 1000;
 export const MAX_REGEX_INPUT_LENGTH = 64 * 1024;
+/**
+ * Largest finite `{n}` / `{n,m}` repetition allowed. A huge bounded count over
+ * an atom (`a{999999}`) scans quadratically (each start position retries up to
+ * n chars); no eval-assertion pattern legitimately repeats > 1000 times - use
+ * the output structure length check instead.
+ */
+export const MAX_QUANTIFIER_REPEAT = 1000;
 const ALLOWED_FLAGS = 'dgimsuy';
 
 export class UnsafeRegexError extends Error {
@@ -41,16 +48,18 @@ interface Quantifier {
   unbounded: boolean;
   /** Effective maximum repetition is >= 2 (drives bounded blowup like `(a?){30}`). */
   maxAtLeast2: boolean;
+  /** Finite maximum repetition, or Infinity when unbounded. */
+  maxReps: number;
 }
 
 /** Parse a quantifier at `pattern[i]`, or null if it is not a quantifier. */
 function parseQuantifier(pattern: string, i: number): Quantifier | null {
   const ch = pattern[i];
   if (ch === '*' || ch === '+') {
-    return { length: 1, unbounded: true, maxAtLeast2: true };
+    return { length: 1, unbounded: true, maxAtLeast2: true, maxReps: Infinity };
   }
   if (ch === '?') {
-    return { length: 1, unbounded: false, maxAtLeast2: false };
+    return { length: 1, unbounded: false, maxAtLeast2: false, maxReps: 1 };
   }
   if (ch === '{') {
     const m = /^\{(\d*)(,(\d*))?\}/.exec(pattern.slice(i));
@@ -63,12 +72,13 @@ function parseQuantifier(pattern: string, i: number): Quantifier | null {
     const hasComma = m[2] !== undefined;
     const maxStr = m[3];
     if (!hasComma) {
-      return { length: m[0].length, unbounded: false, maxAtLeast2: min >= 2 };
+      return { length: m[0].length, unbounded: false, maxAtLeast2: min >= 2, maxReps: min };
     }
     if (maxStr === undefined || maxStr === '') {
-      return { length: m[0].length, unbounded: true, maxAtLeast2: true }; // {n,}
+      return { length: m[0].length, unbounded: true, maxAtLeast2: true, maxReps: Infinity }; // {n,}
     }
-    return { length: m[0].length, unbounded: false, maxAtLeast2: Number.parseInt(maxStr, 10) >= 2 };
+    const max = Number.parseInt(maxStr, 10);
+    return { length: m[0].length, unbounded: false, maxAtLeast2: max >= 2, maxReps: max };
   }
   return null;
 }
@@ -174,6 +184,10 @@ function isRiskyRegex(pattern: string): boolean {
 
     const quant = parseQuantifier(pattern, i);
     if (quant !== null) {
+      // A huge FINITE bounded repetition scans quadratically over its atom/group.
+      if (Number.isFinite(quant.maxReps) && quant.maxReps > MAX_QUANTIFIER_REPEAT) {
+        return true;
+      }
       // A quantifier in a group's body makes that body ambiguous (optionality /
       // length ambiguity).
       markEnclosingAmbiguous();
