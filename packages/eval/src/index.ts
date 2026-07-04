@@ -1,1 +1,50 @@
-export const VERSION = '0.1.0';
+export { bigintReplacer, stringifyJsonLine, zAmount } from './core/bigint-json.js';
+export {
+  CANONICAL_ERROR_CODES,
+  CanonicalErrorCodeSchema,
+  canonicalCodeOf,
+  type CanonicalErrorCode,
+} from './core/canonical-codes.js';
+export {
+  AssertionSchema,
+  AssetRefSchema,
+  CaseJudgeConfigSchema,
+  CaseMetadataSchema,
+  CaseSchema,
+  EnvironmentSchema,
+  EventRefSchema,
+  FailureInjectionSchema,
+  MockToolSchema,
+  PAYMENT_TOOL_NAMES,
+  ParamMatcherSchema,
+  PaymentCheckSchema,
+  PaymentToolsSchema,
+  ScenarioSchema,
+  ScriptedStepSchema,
+  TraceCheckSchema,
+  type Assertion,
+  type AssetRef,
+  type CaseJudgeConfig,
+  type CaseMetadata,
+  type Environment,
+  type EvalCase,
+  type EvalCaseInput,
+  type EventRef,
+  type FailureInjection,
+  type MockTool,
+  type ParamMatcher,
+  type PaymentCheck,
+  type PaymentTools,
+  type Scenario,
+  type ScriptedStep,
+  type TraceCheck,
+} from './core/case-schema.js';
+export {
+  normalizeCases,
+  parseDataset,
+  parseDatasetStrict,
+  serializeDataset,
+  type DatasetIssue,
+  type ParseDatasetResult,
+} from './core/dataset.js';
+export { EvalConfigError, NotImplementedError } from './core/errors.js';
