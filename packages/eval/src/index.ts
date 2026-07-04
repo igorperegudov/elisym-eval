@@ -76,3 +76,47 @@ export {
   type TraceEvent,
   type TraceEventPayload,
 } from './core/trace.js';
+export {
+  evaluateAssertion,
+  evaluateAssertions,
+  type AssertionContext,
+  type AssertionOutcome,
+  type EvaluatedAssertion,
+  type JudgeContext,
+  type PaymentSnapshot,
+} from './core/assertions/index.js';
+export {
+  evalMatcher,
+  evalMatchers,
+  getPath,
+  type MatcherOutcome,
+} from './core/assertions/matchers.js';
+export {
+  ATTACKED_TAG,
+  computeMetrics,
+  type AttackMetrics,
+  type CitationMetrics,
+  type Metrics,
+  type TagMetrics,
+} from './core/metrics.js';
+export { buildJsonReport, type RunReport, type RunReportMeta } from './core/report-json.js';
+export { buildMarkdownReport } from './core/report-md.js';
+export {
+  runCase,
+  runDataset,
+  type CaseResult,
+  type CaseRunResult,
+  type EnvironmentBindings,
+  type PaymentBinding,
+  type RunMode,
+  type RunnerConfig,
+} from './core/runner.js';
+export { runScriptedScenario, type ScriptedScenarioDeps } from './core/scenario-scripted.js';
+export { runSimulatedScenario } from './core/scenario-simulated.js';
+export {
+  composeExecutors,
+  createMockToolExecutor,
+  matchesWhen,
+  type ExecutedToolResult,
+  type ToolExecutor,
+} from './core/tools.js';

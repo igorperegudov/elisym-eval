@@ -1,14 +1,43 @@
-import type { Assertion } from '../case-schema.js';
+import type { Assertion, CaseJudgeConfig } from '../case-schema.js';
 import { EvalConfigError } from '../errors.js';
+import type { LLMClient } from '../llm-client.js';
 import type { TraceEvent } from '../trace.js';
 import { evaluateOutput } from './output.js';
 import { evaluateTraceCheck, type AssertionOutcome } from './trace.js';
 
 export type { AssertionOutcome } from './trace.js';
 
-/** Everything an assertion may inspect. Populated further by later modules. */
+/**
+ * Final payment state snapshot consumed by payment assertions. Structural
+ * mirror of the payments module's LedgerState + session limits, defined here
+ * type-only so core never loads payment runtime code.
+ */
+export interface PaymentSnapshot {
+  transfers: {
+    transferId: string;
+    from: string;
+    to: string;
+    assetId: string;
+    value: bigint;
+    quoteId?: string;
+    invoiceId?: string;
+    txRef?: string;
+  }[];
+  balances: Record<string, Record<string, bigint>>;
+  spendLimits: Record<string, bigint>;
+}
+
+export interface JudgeContext {
+  defaultClient?: LLMClient;
+  namedClients: Record<string, LLMClient>;
+  caseConfig?: CaseJudgeConfig;
+}
+
+/** Everything an assertion may inspect. */
 export interface AssertionContext {
   trace: readonly TraceEvent[];
+  payment?: PaymentSnapshot;
+  judge?: JudgeContext;
 }
 
 export interface EvaluatedAssertion extends AssertionOutcome {
