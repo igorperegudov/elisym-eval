@@ -15,7 +15,7 @@ export default defineConfig([
     sourcemap: true,
     clean: true,
     treeshake: true,
-    external: ['zod', 'node:fs', 'node:fs/promises', 'node:path', 'node:url'],
+    external: ['zod', 'node:fs', 'node:fs/promises', 'node:path', 'node:url', 'node:vm'],
   },
   {
     entry: {
@@ -27,6 +27,14 @@ export default defineConfig([
     sourcemap: true,
     treeshake: true,
     banner: { js: '#!/usr/bin/env node' },
-    external: ['zod', 'commander', 'node:fs', 'node:fs/promises', 'node:path', 'node:url'],
+    external: [
+      'zod',
+      'commander',
+      'node:fs',
+      'node:fs/promises',
+      'node:path',
+      'node:url',
+      'node:vm',
+    ],
   },
 ]);

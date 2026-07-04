@@ -3,6 +3,7 @@ import {
   boundInput,
   MAX_PATTERN_LENGTH,
   MAX_REGEX_INPUT_LENGTH,
+  REGEX_TIMEOUT_MS,
   safeMatchAll,
   safeRegExp,
   safeTest,
@@ -142,4 +143,15 @@ describe('input bounding', () => {
     const matches = [...safeMatchAll(safeRegExp('(a)', 'g'), 'aaa')];
     expect(matches).toHaveLength(3);
   });
+
+  test('wall-clock timeout is the sound backstop for patterns isRiskyRegex misses', () => {
+    // An ungrouped chain of optionals is exponential but passes the static
+    // check (`?` is not counted, no group). The vm timeout must bound it.
+    const pattern = 'a?'.repeat(30) + 'b';
+    const regex = safeRegExp(pattern); // accepted statically
+    const start = Date.now();
+    // Against all-`a` (no `b`) this backtracks 2^30 ways; safeTest must throw.
+    expect(() => safeTest(regex, 'a'.repeat(30))).toThrow(UnsafeRegexError);
+    expect(Date.now() - start).toBeLessThan(REGEX_TIMEOUT_MS + 2000);
+  }, 10_000);
 });

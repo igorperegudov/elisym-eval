@@ -51,7 +51,9 @@ export { EvalConfigError, NotImplementedError } from './core/errors.js';
 export {
   boundInput,
   MAX_PATTERN_LENGTH,
+  MAX_QUANTIFIER_REPEAT,
   MAX_REGEX_INPUT_LENGTH,
+  REGEX_TIMEOUT_MS,
   safeExec,
   safeMatchAll,
   safeRegExp,

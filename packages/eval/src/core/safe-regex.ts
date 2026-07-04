@@ -1,3 +1,5 @@
+import vm from 'node:vm';
+
 /**
  * Defense-in-depth for case/dataset-supplied regular expressions.
  *
@@ -10,17 +12,24 @@
  *
  * 1. bound the pattern length,
  * 2. allowlist flags (also stops a malformed-flags `SyntaxError` crash),
- * 3. statically reject every catastrophic-backtracking family via a sound
- *    over-approximation (see `isRiskyRegex`): >=2 unbounded quantifiers, a
- *    repetition (max>=2 or unbounded) over an ambiguous group, or a
- *    backreference. A pattern that avoids these matches in linear time.
+ * 3. fast-reject the well-known catastrophic families up front (see
+ *    `isRiskyRegex`): >=2 repetition-capable quantifiers, a repetition over an
+ *    ambiguous group, a backreference, or a huge bounded count;
  * 4. bound the subject length before matching (belt-and-braces).
  *
- * We rely on a sound static check rather than a linear-time native engine
- * because re2 crashes under Bun (this project's runtime), and a wall-clock
- * timeout cannot interrupt V8's synchronous backtracking. The check is a
- * deliberate over-approximation - it rejects some safe patterns too - which is
- * the safe direction for a matcher over semi-untrusted dataset input.
+ * Two layers, because static detection of "safe" regexes is undecidable: no
+ * char scan catches every family (five audit rounds each found a new one), so
+ *   - `isRiskyRegex` fast-rejects the well-known catastrophic families at
+ *     construction (a deliberate over-approximation - it rejects some safe
+ *     patterns like `\d{4}-\d{2}` too, which is the safe direction);
+ *   - every actual match runs under a hard wall-clock timeout (`safeTest` /
+ *     `safeMatchAll` / `safeExec`), the SOUND backstop that bounds ANY pattern
+ *     the static check misses. Modern V8 checks for interrupts during regex
+ *     execution, so a `node:vm` timeout interrupts synchronous backtracking
+ *     (a plain setTimeout cannot). re2 (a linear-time engine) was rejected
+ *     because it segfaults under Bun. Matching runs under Node (the CLI bin's
+ *     runtime and the test runner); Bun only runs compile/validate, which do
+ *     not match case-supplied patterns.
  */
 
 export const MAX_PATTERN_LENGTH = 1000;
@@ -84,12 +93,13 @@ function parseQuantifier(pattern: string, i: number): Quantifier | null {
 }
 
 /**
- * Sound over-approximation of catastrophic-backtracking risk.
- *
- * Worst-case super-linear matching in a backtracking engine has exactly these
- * mechanisms; a "repetition-capable" quantifier is one that can match a span in
- * more than one length (`*`, `+`, `{n,}`, or `{n,m}`/`{n}` with max >= 2 - but
- * NOT `?`, whose two choices matter only under another repetition):
+ * Best-effort fast-reject of catastrophic-backtracking risk. NOT complete - it
+ * is a cheap pre-filter that catches the common families instantly; the
+ * wall-clock timeout on every match is what makes the harness sound (e.g. an
+ * ungrouped `a?a?...a?b` chain is exponential yet passes this check, and is
+ * bounded only by the timeout). A "repetition-capable" quantifier is one that
+ * can match a span in more than one length (`*`, `+`, `{n,}`, or `{n,m}`/`{n}`
+ * with max >= 2 - but NOT `?`, whose two choices matter only under a repetition):
  *   (a) two or more repetition-capable quantifiers can consume overlapping
  *       spans -> polynomial (`a*a*b`, `a{0,1000}a{0,1000}b`, `.*.*=`);
  *   (b) a repetition-capable quantifier applied to an AMBIGUOUS group - one
@@ -98,16 +108,9 @@ function parseQuantifier(pattern: string, i: number): Quantifier | null {
  *   (c) a backreference (`\1`-`\9`, `\k<name>`), not linear-time in general;
  *   (d) a single finite repetition with a huge max scans quadratically
  *       (`a{999999}`), capped by MAX_QUANTIFIER_REPEAT.
- * A pattern with at most one repetition-capable quantifier, none over an
- * ambiguous group, no backreference, and no huge count runs in linear time -
- * there is no other super-linear mechanism.
- *
- * This is a deliberate over-approximation: it also rejects some safe patterns
- * (`a*b*` over disjoint alphabets, `\d{4}-\d{2}` separated by a literal). Use a
- * single quantifier, a character class, or the output structure length check
- * instead. Escapes and character classes are skipped so `\+`, `[+*|]` are
- * literals. Sound against catastrophic backtracking without a native engine
- * (re2 crashes under Bun); not a minimal over-approximation.
+ * It over-rejects some safe patterns too (`a*b*` over disjoint alphabets,
+ * `\d{4}-\d{2}` separated by a literal) - the safe direction. Escapes and
+ * character classes are skipped so `\+`, `[+*|]` are literals.
  */
 function isRiskyRegex(pattern: string): boolean {
   interface Group {
@@ -260,17 +263,67 @@ export function boundInput(input: string): string {
   return input.length > MAX_REGEX_INPUT_LENGTH ? input.slice(0, MAX_REGEX_INPUT_LENGTH) : input;
 }
 
-/** `regex.test` over a length-bounded subject. */
+/**
+ * Hard wall-clock bound on a single regex match. `isRiskyRegex` fast-rejects
+ * the known catastrophic families, but static detection of "safe" regexes is
+ * undecidable; this is the SOUND backstop. Modern V8 checks for interrupts
+ * during regex execution, so a `vm` timeout (unlike a plain setTimeout) DOES
+ * interrupt synchronous backtracking - verified on Node and Bun.
+ */
+export const REGEX_TIMEOUT_MS = 1000;
+
+// A reusable context + precompiled scripts avoid per-call setup cost. The
+// subject/regex are injected as globals before each run.
+const regexContext = vm.createContext({ __re: null as RegExp | null, __s: '' });
+const TEST_SCRIPT = new vm.Script('__re.test(__s)');
+const EXEC_SCRIPT = new vm.Script(
+  '(() => { const m = __re.exec(__s); return m ? Array.from(m) : null; })()',
+);
+const MATCH_ALL_SCRIPT = new vm.Script('Array.from(__s.matchAll(__re), (m) => Array.from(m))');
+
+function isTimeout(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    ((err as { code?: string }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT' ||
+      /timed out/i.test((err as { message?: string }).message ?? ''))
+  );
+}
+
+function runBounded<T>(script: vm.Script, regex: RegExp, input: string): T {
+  const context = regexContext as unknown as { __re: RegExp | null; __s: string };
+  context.__re = regex;
+  context.__s = boundInput(input);
+  try {
+    return script.runInContext(regexContext, { timeout: REGEX_TIMEOUT_MS }) as T;
+  } catch (err) {
+    if (isTimeout(err)) {
+      throw new UnsafeRegexError(
+        `regex match exceeded ${REGEX_TIMEOUT_MS}ms - catastrophic backtracking (ReDoS)`,
+      );
+    }
+    throw err;
+  } finally {
+    context.__re = null;
+    context.__s = '';
+  }
+}
+
+/** `regex.test` over a length-bounded subject, under a hard wall-clock timeout. */
 export function safeTest(regex: RegExp, input: string): boolean {
-  return regex.test(boundInput(input));
+  return runBounded<boolean>(TEST_SCRIPT, regex, input);
 }
 
-/** `string.matchAll` over a length-bounded subject (regex must carry the `g` flag). */
-export function safeMatchAll(regex: RegExp, input: string): IterableIterator<RegExpMatchArray> {
-  return boundInput(input).matchAll(regex);
+/**
+ * `string.matchAll` over a length-bounded subject, under a hard timeout.
+ * Returns plain match arrays (`[full, ...groups]` per match); the regex must
+ * carry the `g` flag.
+ */
+export function safeMatchAll(regex: RegExp, input: string): RegExpMatchArray[] {
+  return runBounded<RegExpMatchArray[]>(MATCH_ALL_SCRIPT, regex, input);
 }
 
-/** `regex.exec` over a length-bounded subject. */
+/** `regex.exec` over a length-bounded subject, under a hard timeout. */
 export function safeExec(regex: RegExp, input: string): RegExpExecArray | null {
-  return regex.exec(boundInput(input));
+  return runBounded<RegExpExecArray | null>(EXEC_SCRIPT, regex, input);
 }
