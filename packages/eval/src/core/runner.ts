@@ -9,6 +9,7 @@ import type { Assertion, Environment, EvalCase } from './case-schema.js';
 import { EvalConfigError, NotImplementedError } from './errors.js';
 import type { JudgeVerdict } from './judge-core.js';
 import type { LLMClient } from './llm-client.js';
+import { createRecordingSession, createReplayExecutor, type RecordingStore } from './recorded.js';
 import type { Rubric } from './rubric.js';
 import { runScriptedScenario } from './scenario-scripted.js';
 import { composeExecutors, createMockToolExecutor, type ToolExecutor } from './tools.js';
@@ -34,6 +35,13 @@ export interface RunnerConfig {
   clock?: () => number;
   /** Prepended to the protocol prompt of the agent under test. */
   systemPrompt?: string;
+  /**
+   * Record/replay of tool + payment responses. With `record: true` (mocked or
+   * live mode) every run is captured to the store under the case's
+   * recordingRef (default: the case id). In `recorded` mode, runs replay from
+   * the store instead of executing tools.
+   */
+  recording?: { store: RecordingStore; record?: boolean };
 }
 
 export interface CaseRunResult {
@@ -95,26 +103,50 @@ async function runOnce(
     throw new NotImplementedError('simulated scenarios');
   }
 
+  const mode = config.mode ?? 'mocked';
   const trace = new TraceRecorder(config.clock ?? defaultClock());
-  const executors: ToolExecutor[] = [];
+  const recordingRef = evalCase.environment.recordingRef ?? evalCase.id;
   let paymentBinding: PaymentBinding | undefined;
+  let recordingSession: ReturnType<typeof createRecordingSession> | undefined;
+  let recordedSnapshot: PaymentSnapshot | undefined;
+  let tools: ToolExecutor;
 
-  const mockTools = evalCase.environment.tools.filter((t) => t.kind === 'mock');
-  if (mockTools.length > 0) {
-    executors.push(createMockToolExecutor(mockTools));
-  }
-  const paymentTools = evalCase.environment.tools.find((t) => t.kind === 'payment');
-  if (paymentTools !== undefined) {
-    if (bindings.paymentTools === undefined) {
+  if (mode === 'recorded') {
+    const store = config.recording?.store;
+    if (store === undefined) {
+      throw new EvalConfigError('recorded mode requires a recording store in the runner config');
+    }
+    const recording = await store.load(recordingRef);
+    if (recording === null) {
       throw new EvalConfigError(
-        `case ${evalCase.id} declares payment tools; provide an adapter factory ` +
-          '(e.g. createMockAdapterFactory() from "@elisym/eval/payments")',
+        `no recording "${recordingRef}" found for case ${evalCase.id}; record one first with record: true`,
       );
     }
-    paymentBinding = await bindings.paymentTools(evalCase.environment, trace);
-    executors.push(paymentBinding.executor);
+    tools = createReplayExecutor(recording, trace);
+    recordedSnapshot = recording.paymentSnapshot;
+  } else {
+    const executors: ToolExecutor[] = [];
+    const mockTools = evalCase.environment.tools.filter((t) => t.kind === 'mock');
+    if (mockTools.length > 0) {
+      executors.push(createMockToolExecutor(mockTools));
+    }
+    const paymentTools = evalCase.environment.tools.find((t) => t.kind === 'payment');
+    if (paymentTools !== undefined) {
+      if (bindings.paymentTools === undefined) {
+        throw new EvalConfigError(
+          `case ${evalCase.id} declares payment tools; provide an adapter factory ` +
+            '(e.g. createMockAdapterFactory() from "@elisym/eval/payments")',
+        );
+      }
+      paymentBinding = await bindings.paymentTools(evalCase.environment, trace);
+      executors.push(paymentBinding.executor);
+    }
+    tools = composeExecutors(executors);
+    if (config.recording?.record === true) {
+      recordingSession = createRecordingSession(evalCase.id, tools, trace);
+      tools = recordingSession.executor;
+    }
   }
-  const tools = composeExecutors(executors);
 
   let runError: string | undefined;
   try {
@@ -136,6 +168,23 @@ async function runOnce(
   if (paymentBinding !== undefined) {
     ctx.payment = await paymentBinding.snapshot();
     await paymentBinding.close?.();
+  } else if (recordedSnapshot !== undefined) {
+    // The recorded ledger reflects the RECORDED run. The replayed agent may
+    // have diverged, so only keep transfers whose settlement events were
+    // actually re-emitted during this replay.
+    const replayedTransferIds = new Set(
+      trace.events
+        .filter((e) => e.type === 'payment.execute' && e.status === 'settled')
+        .map((e) => (e.type === 'payment.execute' ? e.transferId : undefined))
+        .filter((id): id is string => id !== undefined),
+    );
+    ctx.payment = {
+      ...recordedSnapshot,
+      transfers: recordedSnapshot.transfers.filter((t) => replayedTransferIds.has(t.transferId)),
+    };
+  }
+  if (recordingSession !== undefined) {
+    await config.recording!.store.save(recordingRef, recordingSession.finish(ctx.payment));
   }
   const judgeContext = buildJudgeContext(evalCase, config);
   if (judgeContext !== undefined) {
@@ -176,7 +225,9 @@ export async function runCase(
   bindings: EnvironmentBindings = {},
 ): Promise<CaseResult> {
   const mode = config.mode ?? 'mocked';
-  if (evalCase.environment.mode !== mode) {
+  // Recorded mode replays any case that has a recording; otherwise the case's
+  // declared environment mode must match the runner's.
+  if (mode !== 'recorded' && evalCase.environment.mode !== mode) {
     return {
       caseId: evalCase.id,
       tags: evalCase.tags,

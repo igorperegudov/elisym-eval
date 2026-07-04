@@ -5,6 +5,7 @@ import type { AgentUnderTest } from '../core/agent.js';
 import { parseDatasetStrict } from '../core/dataset.js';
 import { EvalConfigError } from '../core/errors.js';
 import { computeMetrics } from '../core/metrics.js';
+import { createFileRecordingStore } from '../core/recorded.js';
 import { buildJsonReport, type RunReport } from '../core/report-json.js';
 import { buildMarkdownReport } from '../core/report-md.js';
 import {
@@ -28,6 +29,10 @@ export interface RunCliOptions extends JudgeFlags {
   rubrics?: string;
   reportJson?: string;
   reportMd?: string;
+  /** Capture tool/payment responses to the recordings directory while running. */
+  record?: boolean;
+  /** Directory for recordings (record mode and recorded replay). */
+  recordings?: string;
   failFast: boolean;
 }
 
@@ -86,6 +91,13 @@ export async function runCli(
     }
   }
 
+  if (options.mode === 'recorded' && options.recordings === undefined) {
+    throw new EvalConfigError('--mode recorded requires --recordings <dir>');
+  }
+  if (options.record === true && options.recordings === undefined) {
+    throw new EvalConfigError('--record requires --recordings <dir>');
+  }
+
   const judge = createJudgeFromFlags(options);
   const config: RunnerConfig = {
     agent,
@@ -94,6 +106,14 @@ export async function runCli(
     concurrency: options.concurrency,
     ...(judge !== undefined ? { judge } : {}),
     ...(options.rubrics !== undefined ? { rubrics: await loadRubricsFile(options.rubrics) } : {}),
+    ...(options.recordings !== undefined
+      ? {
+          recording: {
+            store: createFileRecordingStore(options.recordings),
+            ...(options.record === true ? { record: true } : {}),
+          },
+        }
+      : {}),
   };
 
   // Sequential when fail-fast so we can stop at the first failure.

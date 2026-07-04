@@ -53,6 +53,8 @@ program
   .option('--judge-model <id>', 'model id for the judge')
   .option('--judge-base-url <url>', 'endpoint for openai-compatible / custom judges')
   .option('--rubrics <file.json>', 'rubrics file for judge assertions')
+  .option('--record', 'capture tool/payment responses to the recordings directory', false)
+  .option('--recordings <dir>', 'recordings directory (for --record and --mode recorded)')
   .option('--fail-fast', 'stop at the first failing case', false)
   .action(
     safe(
@@ -70,6 +72,8 @@ program
           judgeModel?: string;
           judgeBaseUrl?: string;
           rubrics?: string;
+          record: boolean;
+          recordings?: string;
           failFast: boolean;
         },
       ) => {
@@ -88,6 +92,8 @@ program
           ...(options.judgeModel !== undefined ? { judgeModel: options.judgeModel } : {}),
           ...(options.judgeBaseUrl !== undefined ? { judgeBaseUrl: options.judgeBaseUrl } : {}),
           ...(options.rubrics !== undefined ? { rubrics: options.rubrics } : {}),
+          ...(options.record ? { record: true } : {}),
+          ...(options.recordings !== undefined ? { recordings: options.recordings } : {}),
           failFast: options.failFast,
         });
         process.exit(code);
