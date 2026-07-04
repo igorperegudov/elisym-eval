@@ -1,8 +1,10 @@
 {
   "name": "elisym-eval",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "type": "module",
-  "workspaces": ["packages/*"],
   "scripts": {
     "build": "turbo run build",
     "clean": "turbo run clean",

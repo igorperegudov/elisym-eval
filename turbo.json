@@ -21,7 +21,11 @@
     "test:live": {
       "cache": false,
       "dependsOn": ["build"],
-      "passThroughEnv": ["ELISYM_EVAL_DEVNET_PAYER", "ELISYM_EVAL_DEVNET_PAYEE", "ELISYM_EVAL_RPC_URL"]
+      "passThroughEnv": [
+        "ELISYM_EVAL_DEVNET_PAYER",
+        "ELISYM_EVAL_DEVNET_PAYEE",
+        "ELISYM_EVAL_RPC_URL"
+      ]
     },
     "clean": {
       "cache": false

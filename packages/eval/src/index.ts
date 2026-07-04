@@ -48,3 +48,31 @@ export {
   type ParseDatasetResult,
 } from './core/dataset.js';
 export { EvalConfigError, NotImplementedError } from './core/errors.js';
+export type {
+  AgentSession,
+  AgentSessionInit,
+  AgentTurn,
+  AgentUnderTest,
+  ToolCall,
+  ToolResultInput,
+  ToolSpec,
+} from './core/agent.js';
+export type { ChatMessage, CompleteOptions, LLMClient } from './core/llm-client.js';
+export {
+  createReferenceAgent,
+  extractFirstJsonObject,
+  ReferenceAgentProtocolError,
+  type ReferenceAgentOptions,
+} from './core/reference-agent.js';
+export {
+  assistantMessages,
+  finalOutput,
+  paymentExecutions,
+  paymentQuotes,
+  toolCalls,
+  TraceRecorder,
+  type RetrievedDoc,
+  type TraceAttributes,
+  type TraceEvent,
+  type TraceEventPayload,
+} from './core/trace.js';
