@@ -10,12 +10,20 @@
  *
  * 1. bound the pattern length,
  * 2. allowlist flags (also stops a malformed-flags `SyntaxError` crash),
- * 3. statically reject nested unbounded quantifiers (the classic exponential
- *    shapes: `(a+)+`, `(a*)*`, `(.*)+`, `(\d+){2,}`),
+ * 3. statically reject the two classic exponential families: an unbounded
+ *    quantifier applied to a group whose body contains either another
+ *    unbounded quantifier (`(a+)+`, `(a*)*`, `(.*)+`, `(\d+){2,}`) or an
+ *    alternation (`(a|a)*`, `(a|ab)+`, `(.|.)*`). The alternation check is a
+ *    conservative over-approximation: it also rejects the disjoint-and-safe
+ *    `(a|b)*`, so quantified alternations must be rewritten (e.g. a character
+ *    class `[ab]*`). None of the bundled dataset patterns quantify a group,
+ *    so this costs nothing in practice.
  * 4. bound the subject length before matching (caps polynomial cases and
  *    accidental huge inputs).
  *
- * This is proportionate for a local harness; it is not a formal guarantee.
+ * Static detection of "safe" regexes is undecidable in general; this catches
+ * the well-known evil-regex families and is proportionate for a local harness,
+ * but is not a formal guarantee.
  */
 
 export const MAX_PATTERN_LENGTH = 1000;
@@ -30,18 +38,26 @@ export class UnsafeRegexError extends Error {
 }
 
 /**
- * Reject a group that is quantified with an unbounded quantifier and whose
- * body itself contains an unbounded quantifier - the star-height >= 2 shape
- * that produces exponential backtracking. Escapes and character classes are
- * skipped so `\+`, `[+*]` etc. are treated as literals.
+ * Reject an unbounded quantifier applied to a group whose body (at any nesting
+ * depth) contains an alternation or another unbounded quantifier - the two
+ * classic exponential-backtracking families. Escapes and character classes are
+ * skipped so `\+`, `[+*|]` etc. are treated as literals.
  */
-function hasNestedUnboundedQuantifier(pattern: string): boolean {
+function isRiskyRegex(pattern: string): boolean {
   interface Group {
-    bodyHasUnbounded: boolean;
+    /** Body contains an alternation or unbounded quantifier (recursively). */
+    bodyHasRisk: boolean;
   }
   const stack: Group[] = [];
   let lastClosed: Group | null = null;
   let inClass = false;
+
+  const markEnclosingRisk = (): void => {
+    const top = stack[stack.length - 1];
+    if (top !== undefined) {
+      top.bodyHasRisk = true;
+    }
+  };
 
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i];
@@ -62,32 +78,39 @@ function hasNestedUnboundedQuantifier(pattern: string): boolean {
       continue;
     }
     if (ch === '(') {
-      stack.push({ bodyHasUnbounded: false });
+      stack.push({ bodyHasRisk: false });
       lastClosed = null;
       continue;
     }
     if (ch === ')') {
-      lastClosed = stack.pop() ?? null;
+      const closed = stack.pop() ?? null;
+      // Propagate the closed group's risk up to its parent's body.
+      if (closed !== null && closed.bodyHasRisk) {
+        markEnclosingRisk();
+      }
+      lastClosed = closed;
+      continue;
+    }
+    if (ch === '|') {
+      // An alternation makes the enclosing group ambiguous.
+      markEnclosingRisk();
+      lastClosed = null;
       continue;
     }
 
     const isUnbounded =
       ch === '+' ||
       ch === '*' ||
-      // {n,} with no upper bound (the comma is present, nothing before `}` after it)
+      // {n,} with no upper bound (a comma, then `}` with no max).
       (ch === '{' && /^\{\d*,\}/.test(pattern.slice(i)));
 
     if (isUnbounded) {
-      // A quantifier applied directly to a just-closed group whose body was
-      // itself unbounded -> nested unbounded quantifier.
-      if (lastClosed !== null && lastClosed.bodyHasUnbounded) {
+      // A quantifier applied directly to a just-closed risky group -> exponential.
+      if (lastClosed !== null && lastClosed.bodyHasRisk) {
         return true;
       }
-      // Record that the enclosing group's body contains an unbounded quantifier.
-      const top = stack[stack.length - 1];
-      if (top !== undefined) {
-        top.bodyHasUnbounded = true;
-      }
+      // The quantifier itself makes the enclosing group's body risky.
+      markEnclosingRisk();
     }
     if (ch !== '?') {
       // `?` after a quantifier only makes it lazy; keep lastClosed so `(a+)+?`
@@ -119,9 +142,11 @@ export function safeRegExp(pattern: string, flags = ''): RegExp {
     );
   }
   validateFlags(flags);
-  if (hasNestedUnboundedQuantifier(pattern)) {
+  if (isRiskyRegex(pattern)) {
     throw new UnsafeRegexError(
-      `regex pattern "${pattern}" has nested unbounded quantifiers (catastrophic-backtracking risk)`,
+      `regex pattern "${pattern}" has an unbounded quantifier over an ambiguous group ` +
+        '(nested quantifier or alternation) - catastrophic-backtracking risk; ' +
+        'rewrite quantified alternations as a character class',
     );
   }
   return new RegExp(pattern, flags);

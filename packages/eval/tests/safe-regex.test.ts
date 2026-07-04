@@ -29,6 +29,26 @@ describe('safeRegExp', () => {
     }
   });
 
+  test('rejects unbounded-quantified alternation groups (overlap backtracking)', () => {
+    for (const bad of [
+      '(a|a)*',
+      '(a|ab)+',
+      '(.|.)*',
+      '([a-z]|[a-z])*',
+      '((a|a))*',
+      '(a|b)*',
+      '(a|b){2,}',
+    ]) {
+      expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
+    }
+  });
+
+  test('allows unquantified or boundedly-quantified alternations', () => {
+    for (const ok of ['(a|b)', '(a|b)?', '(a|b){2,5}', '(\\d+)?', '(foo|bar)x']) {
+      expect(() => safeRegExp(ok), ok).not.toThrow();
+    }
+  });
+
   test('rejects oversized patterns', () => {
     expect(() => safeRegExp('a'.repeat(MAX_PATTERN_LENGTH + 1))).toThrow(/too long/);
     expect(() => safeRegExp('a'.repeat(MAX_PATTERN_LENGTH))).not.toThrow();

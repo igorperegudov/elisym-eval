@@ -164,27 +164,36 @@ async function runOnce(
     trace.record({ type: 'run.error', message: runError });
   }
 
+  // Snapshotting / recording touches the adapter and disk (RPC in live mode);
+  // a throw here must not abort the whole dataset run, so isolate it like the
+  // scenario body - record run.error and let assertions evaluate what we have.
   const ctx: AssertionContext = { trace: trace.events };
-  if (paymentBinding !== undefined) {
-    ctx.payment = await paymentBinding.snapshot();
-    await paymentBinding.close?.();
-  } else if (recordedSnapshot !== undefined) {
-    // The recorded ledger reflects the RECORDED run. The replayed agent may
-    // have diverged, so only keep transfers whose settlement events were
-    // actually re-emitted during this replay.
-    const replayedTransferIds = new Set(
-      trace.events
-        .filter((e) => e.type === 'payment.execute' && e.status === 'settled')
-        .map((e) => (e.type === 'payment.execute' ? e.transferId : undefined))
-        .filter((id): id is string => id !== undefined),
-    );
-    ctx.payment = {
-      ...recordedSnapshot,
-      transfers: recordedSnapshot.transfers.filter((t) => replayedTransferIds.has(t.transferId)),
-    };
-  }
-  if (recordingSession !== undefined) {
-    await config.recording!.store.save(recordingRef, recordingSession.finish(ctx.payment));
+  try {
+    if (paymentBinding !== undefined) {
+      ctx.payment = await paymentBinding.snapshot();
+      await paymentBinding.close?.();
+    } else if (recordedSnapshot !== undefined) {
+      // The recorded ledger reflects the RECORDED run. The replayed agent may
+      // have diverged, so only keep transfers whose settlement events were
+      // actually re-emitted during this replay.
+      const replayedTransferIds = new Set(
+        trace.events
+          .filter((e) => e.type === 'payment.execute' && e.status === 'settled')
+          .map((e) => (e.type === 'payment.execute' ? e.transferId : undefined))
+          .filter((id): id is string => id !== undefined),
+      );
+      ctx.payment = {
+        ...recordedSnapshot,
+        transfers: recordedSnapshot.transfers.filter((t) => replayedTransferIds.has(t.transferId)),
+      };
+    }
+    if (recordingSession !== undefined) {
+      await config.recording!.store.save(recordingRef, recordingSession.finish(ctx.payment));
+    }
+  } catch (err) {
+    const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    runError = runError ?? message;
+    trace.record({ type: 'run.error', message: `post-scenario failure: ${message}` });
   }
   const judgeContext = buildJudgeContext(evalCase, config);
   if (judgeContext !== undefined) {

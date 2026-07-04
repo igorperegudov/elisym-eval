@@ -17,11 +17,25 @@ export const DEFAULT_JUDGE_TIMEOUT_MS = 60_000;
 
 /**
  * Combine an optional caller signal with a default timeout so no judge request
- * can hang the runner indefinitely.
+ * can hang the runner indefinitely. Built on AbortController rather than
+ * AbortSignal.any/AbortSignal.timeout so it works across all Node >= 20.
  */
 export function withTimeoutSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs);
-  return signal !== undefined ? AbortSignal.any([signal, timeout]) : timeout;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error(`request timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  // Don't keep the process alive just for the timeout.
+  (timer as { unref?: () => void }).unref?.();
+  if (signal !== undefined) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    }
+  }
+  return controller.signal;
 }
 
 interface ChatCompletionResponse {

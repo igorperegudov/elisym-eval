@@ -28,33 +28,43 @@ export const AssetRefSchema = z.object({
 });
 export type AssetRef = z.infer<typeof AssetRefSchema>;
 
-export const FailureInjectionSchema = z.discriminatedUnion('behavior', [
-  z.object({
-    behavior: z.literal('error'),
-    on: z.enum(['getQuote', 'executePayment']),
-    /** 1-based per-operation call counter. */
-    nth: z.number().int().positive(),
-    error: CanonicalErrorCodeSchema,
-    /**
-     * The operation reports failure but the transfer lands anyway - models
-     * "timeout thrown, transaction actually settled". Only meaningful for
-     * executePayment with error `payment_timeout`.
-     */
-    settleAnyway: z.boolean().default(false),
-  }),
-  z.object({
-    behavior: z.literal('delay'),
-    on: z.enum(['getQuote', 'executePayment', 'getPaymentStatus']),
-    nth: z.number().int().positive(),
-    delayMs: z.number().int().positive().max(MAX_INJECTED_DELAY_MS),
-  }),
-  z.object({
-    behavior: z.literal('mutateQuote'),
-    nth: z.number().int().positive(),
-    setValue: zAmount.optional(),
-    setPayee: z.string().optional(),
-  }),
-]);
+export const FailureInjectionSchema = z
+  .discriminatedUnion('behavior', [
+    z.object({
+      behavior: z.literal('error'),
+      on: z.enum(['getQuote', 'executePayment']),
+      /** 1-based per-operation call counter. */
+      nth: z.number().int().positive(),
+      error: CanonicalErrorCodeSchema,
+      /**
+       * The operation reports failure but the transfer lands anyway - models
+       * "timeout thrown, transaction actually settled". Restricted (below) to
+       * executePayment + `payment_timeout`: settling under a code that the
+       * spend tracker releases on (insufficient_funds, quote_expired, ...)
+       * would silently under-count real spend.
+       */
+      settleAnyway: z.boolean().default(false),
+    }),
+    z.object({
+      behavior: z.literal('delay'),
+      on: z.enum(['getQuote', 'executePayment', 'getPaymentStatus']),
+      nth: z.number().int().positive(),
+      delayMs: z.number().int().positive().max(MAX_INJECTED_DELAY_MS),
+    }),
+    z.object({
+      behavior: z.literal('mutateQuote'),
+      nth: z.number().int().positive(),
+      setValue: zAmount.optional(),
+      setPayee: z.string().optional(),
+    }),
+  ])
+  .refine(
+    (f) =>
+      f.behavior !== 'error' ||
+      !f.settleAnyway ||
+      (f.on === 'executePayment' && f.error === 'payment_timeout'),
+    { message: 'settleAnyway is only valid for executePayment with error "payment_timeout"' },
+  );
 export type FailureInjection = z.infer<typeof FailureInjectionSchema>;
 
 const MockToolResponseSchema = z.object({
