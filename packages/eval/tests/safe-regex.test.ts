@@ -53,16 +53,25 @@ describe('safeRegExp', () => {
       'a*.*',
       '\\d+-\\d+',
       'a+b+',
+      '\\d+\\.\\d+', // safe (separated), but two unbounded quantifiers -> over-rejected
       // adjacent BOUNDED pairs are the same overlapping-span mechanism
       'a{0,1000}a{0,1000}b',
       '.{0,1000}.{0,1000}=',
       'a{2,1000}a{2,1000}b',
       'a{0,1000}a*b',
       'a*a{0,1000}b',
-      '\\d{4}-\\d{2}', // safe in isolation, but two max>=2 quantifiers -> over-rejected
     ]) {
       expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
     }
+  });
+
+  test('rejects a chain of many variable quantifiers (single-attempt exponential)', () => {
+    // The vm timeout cannot interrupt a single match attempt, so this
+    // 2^N ungrouped-optional family must be caught statically by the count cap.
+    for (const bad of ['a?'.repeat(55) + 'a'.repeat(55), 'a?'.repeat(13), '(a|b)?'.repeat(13)]) {
+      expect(() => safeRegExp(bad), bad.slice(0, 20)).toThrow(UnsafeRegexError);
+    }
+    expect(() => safeRegExp('a?'.repeat(12))).not.toThrow(); // under the cap
   });
 
   test('rejects bounded quantifiers over ambiguous groups (bounded exponential)', () => {
@@ -109,6 +118,8 @@ describe('safeRegExp', () => {
       '(?=foo)bar',
       '(?<=x)y+',
       '\\d{4}', // a single bounded quantifier is fine
+      '\\d{4}-\\d{2}', // exact quantifiers are fixed-length, not ambiguous
+      'https?://.*', // one optional + one unbounded, separated
       'settled: (inv-\\d+)', // one unbounded quantifier
     ]) {
       expect(() => safeRegExp(ok), ok).not.toThrow();
@@ -144,14 +155,17 @@ describe('input bounding', () => {
     expect(matches).toHaveLength(3);
   });
 
-  test('wall-clock timeout is the sound backstop for patterns isRiskyRegex misses', () => {
-    // An ungrouped chain of optionals is exponential but passes the static
-    // check (`?` is not counted, no group). The vm timeout must bound it.
-    const pattern = 'a?'.repeat(30) + 'b';
-    const regex = safeRegExp(pattern); // accepted statically
+  test('the match timeout bounds a quadratic pattern that passes the static check', () => {
+    // `.*x` is a single quantifier (passes isRiskyRegex) but unanchored ->
+    // O(n^2) on a long non-matching subject. The vm timeout must keep it
+    // bounded (it either matches, completes, or times out) - never a hang.
+    const regex = safeRegExp('.*x');
     const start = Date.now();
-    // Against all-`a` (no `b`) this backtracks 2^30 ways; safeTest must throw.
-    expect(() => safeTest(regex, 'a'.repeat(30))).toThrow(UnsafeRegexError);
-    expect(Date.now() - start).toBeLessThan(REGEX_TIMEOUT_MS + 2000);
-  }, 10_000);
+    try {
+      safeTest(regex, 'a'.repeat(MAX_REGEX_INPUT_LENGTH));
+    } catch {
+      // timed out -> UnsafeRegexError; also acceptable
+    }
+    expect(Date.now() - start).toBeLessThan(REGEX_TIMEOUT_MS + 3000);
+  }, 15_000);
 });

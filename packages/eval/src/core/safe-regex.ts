@@ -4,32 +4,33 @@ import vm from 'node:vm';
  * Defense-in-depth for case/dataset-supplied regular expressions.
  *
  * Datasets are shared artifacts (red-team corpora, downloaded suites), so a
- * pattern string is semi-untrusted input. A catastrophic-backtracking pattern
- * (`(a+)+$`) plus a matching subject can wedge the single-threaded runner, and
- * V8 regex execution is synchronous - a wall-clock timeout cannot interrupt it
- * (the event loop is blocked, so the timer never fires). We therefore prevent
- * the blowup up front, without a heavy native engine:
+ * pattern string is semi-untrusted input; a catastrophic-backtracking pattern
+ * can wedge the single-threaded runner. Catastrophic backtracking splits into
+ * two regimes, each handled by a different layer (neither alone is enough):
  *
- * 1. bound the pattern length,
- * 2. allowlist flags (also stops a malformed-flags `SyntaxError` crash),
- * 3. fast-reject the well-known catastrophic families up front (see
- *    `isRiskyRegex`): >=2 repetition-capable quantifiers, a repetition over an
- *    ambiguous group, a backreference, or a huge bounded count;
- * 4. bound the subject length before matching (belt-and-braces).
+ *   SINGLE-ATTEMPT blowup - all the backtracking happens inside ONE match
+ *   attempt (the pattern matches at a fixed start position), e.g. the ungrouped
+ *   `a?a?...a?a...a` 2^N chain. A `node:vm` timeout does NOT interrupt this:
+ *   V8 only checks for interrupts when ADVANCING the start position, not within
+ *   an attempt. So this regime is bounded STATICALLY (`isRiskyRegex`): a cap on
+ *   the number of variable-length quantifiers (MAX_VARIABLE_QUANTIFIERS) bounds
+ *   the 2^N factor, plus rejection of a repetition over an ambiguous group, a
+ *   backreference, and a huge bounded count.
  *
- * Two layers, because static detection of "safe" regexes is undecidable: no
- * char scan catches every family (five audit rounds each found a new one), so
- *   - `isRiskyRegex` fast-rejects the well-known catastrophic families at
- *     construction (a deliberate over-approximation - it rejects some safe
- *     patterns like `\d{4}-\d{2}` too, which is the safe direction);
- *   - every actual match runs under a hard wall-clock timeout (`safeTest` /
- *     `safeMatchAll` / `safeExec`), the SOUND backstop that bounds ANY pattern
- *     the static check misses. Modern V8 checks for interrupts during regex
- *     execution, so a `node:vm` timeout interrupts synchronous backtracking
- *     (a plain setTimeout cannot). re2 (a linear-time engine) was rejected
- *     because it segfaults under Bun. Matching runs under Node (the CLI bin's
- *     runtime and the test runner); Bun only runs compile/validate, which do
- *     not match case-supplied patterns.
+ *   MULTI-POSITION blowup - an unanchored pattern retried across O(n) start
+ *   positions, e.g. `.*x` / `a*a*b` -> polynomial. V8 checks for interrupts
+ *   between positions, so a `node:vm` timeout DOES bound this. Every match runs
+ *   under REGEX_TIMEOUT_MS via `safeTest` / `safeMatchAll` / `safeExec`.
+ *
+ * Plus: bound the pattern length, allowlist flags (stops a malformed-flags
+ * `SyntaxError` crash), and bound the subject length. `isRiskyRegex` also
+ * fast-rejects the common multi-position families (>=2 repetition-capable
+ * quantifiers) so they fail instantly instead of after the timeout.
+ *
+ * re2 (a linear-time engine) was rejected because it segfaults under Bun.
+ * Matching runs under Node (the CLI bin's `#!/usr/bin/env node` runtime and the
+ * test runner); Bun only runs compile/validate, which never match
+ * case-supplied patterns.
  */
 
 export const MAX_PATTERN_LENGTH = 1000;
@@ -41,6 +42,17 @@ export const MAX_REGEX_INPUT_LENGTH = 64 * 1024;
  * the output structure length check instead.
  */
 export const MAX_QUANTIFIER_REPEAT = 1000;
+/**
+ * Largest number of variable-length quantifiers (`?`, `*`, `+`, non-exact
+ * ranges) a pattern may contain. Each independent optional choice can double
+ * the single-attempt backtracking cost, so N of them is up to 2^N. A vm
+ * timeout does NOT interrupt a single match attempt (V8 only checks for
+ * interrupts when advancing the start position), so this cap - not the timeout
+ * - is what bounds single-attempt exponential blowup (`a?a?...a?` chains). At
+ * 12 the worst case is ~2^12 steps (sub-millisecond); real eval patterns use
+ * far fewer.
+ */
+export const MAX_VARIABLE_QUANTIFIERS = 12;
 const ALLOWED_FLAGS = 'dgimsuy';
 
 export class UnsafeRegexError extends Error {
@@ -57,6 +69,8 @@ interface Quantifier {
   unbounded: boolean;
   /** Effective maximum repetition is >= 2 (drives bounded blowup like `(a?){30}`). */
   maxAtLeast2: boolean;
+  /** Matches a span in more than one length (min < max) - the ambiguity source. */
+  variable: boolean;
   /** Finite maximum repetition, or Infinity when unbounded. */
   maxReps: number;
 }
@@ -65,10 +79,10 @@ interface Quantifier {
 function parseQuantifier(pattern: string, i: number): Quantifier | null {
   const ch = pattern[i];
   if (ch === '*' || ch === '+') {
-    return { length: 1, unbounded: true, maxAtLeast2: true, maxReps: Infinity };
+    return { length: 1, unbounded: true, maxAtLeast2: true, variable: true, maxReps: Infinity };
   }
   if (ch === '?') {
-    return { length: 1, unbounded: false, maxAtLeast2: false, maxReps: 1 };
+    return { length: 1, unbounded: false, maxAtLeast2: false, variable: true, maxReps: 1 };
   }
   if (ch === '{') {
     const m = /^\{(\d*)(,(\d*))?\}/.exec(pattern.slice(i));
@@ -81,13 +95,32 @@ function parseQuantifier(pattern: string, i: number): Quantifier | null {
     const hasComma = m[2] !== undefined;
     const maxStr = m[3];
     if (!hasComma) {
-      return { length: m[0].length, unbounded: false, maxAtLeast2: min >= 2, maxReps: min };
+      // `{n}` is exact -> fixed length, not a source of length ambiguity.
+      return {
+        length: m[0].length,
+        unbounded: false,
+        maxAtLeast2: min >= 2,
+        variable: false,
+        maxReps: min,
+      };
     }
     if (maxStr === undefined || maxStr === '') {
-      return { length: m[0].length, unbounded: true, maxAtLeast2: true, maxReps: Infinity }; // {n,}
+      return {
+        length: m[0].length,
+        unbounded: true,
+        maxAtLeast2: true,
+        variable: true,
+        maxReps: Infinity,
+      }; // {n,}
     }
     const max = Number.parseInt(maxStr, 10);
-    return { length: m[0].length, unbounded: false, maxAtLeast2: max >= 2, maxReps: max };
+    return {
+      length: m[0].length,
+      unbounded: false,
+      maxAtLeast2: max >= 2,
+      variable: min < max,
+      maxReps: max,
+    };
   }
   return null;
 }
@@ -108,8 +141,10 @@ function parseQuantifier(pattern: string, i: number): Quantifier | null {
  *   (c) a backreference (`\1`-`\9`, `\k<name>`), not linear-time in general;
  *   (d) a single finite repetition with a huge max scans quadratically
  *       (`a{999999}`), capped by MAX_QUANTIFIER_REPEAT.
- * It over-rejects some safe patterns too (`a*b*` over disjoint alphabets,
- * `\d{4}-\d{2}` separated by a literal) - the safe direction. Escapes and
+ * It over-rejects some safe patterns too (`a*b*` / `\d+\.\d+` - two unbounded
+ * quantifiers separated by a literal, which are only quadratic and are bounded
+ * by the match timeout anyway) - the safe direction. Exact `{n}` quantifiers
+ * are fixed-length and not counted, so `\d{4}-\d{2}` is allowed. Escapes and
  * character classes are skipped so `\+`, `[+*|]` are literals.
  */
 function isRiskyRegex(pattern: string): boolean {
@@ -121,6 +156,7 @@ function isRiskyRegex(pattern: string): boolean {
   let lastClosed: Group | null = null;
   let inClass = false;
   let repeatableCount = 0;
+  let variableCount = 0;
 
   const markEnclosingAmbiguous = (): void => {
     const top = stack[stack.length - 1];
@@ -198,16 +234,25 @@ function isRiskyRegex(pattern: string): boolean {
       // A quantifier in a group's body makes that body ambiguous (optionality /
       // length ambiguity).
       markEnclosingAmbiguous();
-      // (a) two repetition-capable quantifiers (unbounded OR finite max>=2) can
-      // consume overlapping spans -> polynomial (`a*a*b`, `a{0,1000}a{0,1000}b`).
-      // `?` (max 1) is not repetition-capable and only matters under (b).
-      if (quant.unbounded || quant.maxAtLeast2) {
+      // (e) too many variable-length quantifiers -> 2^N single-attempt blowup
+      // (`a?a?...a?a...a`), which a vm timeout cannot interrupt.
+      if (quant.variable) {
+        variableCount++;
+        if (variableCount > MAX_VARIABLE_QUANTIFIERS) {
+          return true;
+        }
+      }
+      // (a) two VARIABLE repetition-capable quantifiers (max>=2 or unbounded,
+      // excluding exact `{n}`) can consume overlapping spans -> polynomial
+      // (`a*a*b`, `a{0,1000}a{0,1000}b`). `?` (max 1) only matters under (b)/(e).
+      if (quant.unbounded || (quant.maxAtLeast2 && quant.variable)) {
         repeatableCount++;
         if (repeatableCount >= 2) {
           return true;
         }
       }
-      // (b) a repetition (max>=2 or unbounded) over an ambiguous group -> exponential.
+      // (b) a repetition (max>=2 or unbounded, including exact `{n}` which
+      // repeats a group n times) over an ambiguous group -> exponential.
       if (
         (quant.unbounded || quant.maxAtLeast2) &&
         lastClosed !== null &&
