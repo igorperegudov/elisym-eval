@@ -36,3 +36,8 @@ roleplay
 roleplays
 redteam
 requoted
+evals
+keypair
+keypairs
+blockhash
+Blockhash

@@ -11,9 +11,9 @@
     "dev": "turbo run dev",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "lint": "oxlint packages/eval/src/",
+    "lint": "oxlint packages/eval/src/ packages/eval-adapter-solana/src/",
     "qa": "turbo run build && turbo run test && turbo run typecheck && bun run lint && oxfmt --check . && bun run spell && turbo run dataset:check",
-    "spell": "cspell --no-progress \"packages/eval/src/**\" \"packages/eval/tests/**\" \"packages/eval/datasets/**/*.ts\" \"*.md\" \"packages/*/README.md\"",
+    "spell": "cspell --no-progress \"packages/eval/src/**\" \"packages/eval/tests/**\" \"packages/eval/datasets/**/*.ts\" \"packages/eval-adapter-solana/src/**\" \"packages/eval-adapter-solana/tests/**\" \"*.md\" \"packages/*/README.md\"",
     "test": "turbo run test",
     "test:live": "turbo run test:live",
     "typecheck": "turbo run typecheck"
