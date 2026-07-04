@@ -10,20 +10,17 @@
  *
  * 1. bound the pattern length,
  * 2. allowlist flags (also stops a malformed-flags `SyntaxError` crash),
- * 3. statically reject the two classic exponential families: an unbounded
- *    quantifier applied to a group whose body contains either another
- *    unbounded quantifier (`(a+)+`, `(a*)*`, `(.*)+`, `(\d+){2,}`) or an
- *    alternation (`(a|a)*`, `(a|ab)+`, `(.|.)*`). The alternation check is a
- *    conservative over-approximation: it also rejects the disjoint-and-safe
- *    `(a|b)*`, so quantified alternations must be rewritten (e.g. a character
- *    class `[ab]*`). None of the bundled dataset patterns quantify a group,
- *    so this costs nothing in practice.
- * 4. bound the subject length before matching (caps polynomial cases and
- *    accidental huge inputs).
+ * 3. statically reject every catastrophic-backtracking family via a sound
+ *    over-approximation (see `isRiskyRegex`): >=2 unbounded quantifiers, a
+ *    repetition (max>=2 or unbounded) over an ambiguous group, or a
+ *    backreference. A pattern that avoids these matches in linear time.
+ * 4. bound the subject length before matching (belt-and-braces).
  *
- * Static detection of "safe" regexes is undecidable in general; this catches
- * the well-known evil-regex families and is proportionate for a local harness,
- * but is not a formal guarantee.
+ * We rely on a sound static check rather than a linear-time native engine
+ * because re2 crashes under Bun (this project's runtime), and a wall-clock
+ * timeout cannot interrupt V8's synchronous backtracking. The check is a
+ * deliberate over-approximation - it rejects some safe patterns too - which is
+ * the safe direction for a matcher over semi-untrusted dataset input.
  */
 
 export const MAX_PATTERN_LENGTH = 1000;
@@ -37,41 +34,81 @@ export class UnsafeRegexError extends Error {
   }
 }
 
+interface Quantifier {
+  /** Length in chars (1 for `*`/`+`/`?`, full length for `{...}`). */
+  length: number;
+  /** No upper bound: `*`, `+`, `{n,}`. */
+  unbounded: boolean;
+  /** Effective maximum repetition is >= 2 (drives bounded blowup like `(a?){30}`). */
+  maxAtLeast2: boolean;
+}
+
+/** Parse a quantifier at `pattern[i]`, or null if it is not a quantifier. */
+function parseQuantifier(pattern: string, i: number): Quantifier | null {
+  const ch = pattern[i];
+  if (ch === '*' || ch === '+') {
+    return { length: 1, unbounded: true, maxAtLeast2: true };
+  }
+  if (ch === '?') {
+    return { length: 1, unbounded: false, maxAtLeast2: false };
+  }
+  if (ch === '{') {
+    const m = /^\{(\d*)(,(\d*))?\}/.exec(pattern.slice(i));
+    // A `{...}` is only a quantifier when it has the `{n}` / `{n,}` / `{n,m}`
+    // shape with a leading count; otherwise it is a literal brace.
+    if (m === null || m[1] === '') {
+      return null;
+    }
+    const min = Number.parseInt(m[1], 10);
+    const hasComma = m[2] !== undefined;
+    const maxStr = m[3];
+    if (!hasComma) {
+      return { length: m[0].length, unbounded: false, maxAtLeast2: min >= 2 };
+    }
+    if (maxStr === undefined || maxStr === '') {
+      return { length: m[0].length, unbounded: true, maxAtLeast2: true }; // {n,}
+    }
+    return { length: m[0].length, unbounded: false, maxAtLeast2: Number.parseInt(maxStr, 10) >= 2 };
+  }
+  return null;
+}
+
 /**
  * Sound over-approximation of catastrophic-backtracking risk.
  *
- * A pattern matches in worst-case super-linear time only if it can match some
- * input span in more than one way under a repetition. That requires either:
+ * Worst-case super-linear matching requires a repetition that can consume the
+ * same input span in more than one way. In JS regex that happens in exactly
+ * these shapes:
  *   (a) two or more unbounded quantifiers (`*`, `+`, `{n,}`) - the polynomial
- *       family `a*a*b` / `.*.*=` and the nested exponential family `(a+)+`; or
- *   (b) a single unbounded quantifier applied to a group containing an
- *       alternation - the exponential family `(a|a)*` / `(a|b)+`; or
- *   (c) a backreference, whose matching is not linear in general.
- * A pattern with at most one unbounded quantifier, no quantified alternation
- * group, and no backreference runs in linear time.
+ *       `a*a*b` / `.*.*=` and nested-exponential `(a+)+` families;
+ *   (b) a quantifier whose effective max is >= 2 (or unbounded) applied to an
+ *       AMBIGUOUS group - one whose body contains an alternation or a nested
+ *       quantifier: `(a|a)*`, `(a?){30}`, `(.*){10}`, `(a+){10}`; or
+ *   (c) a backreference (`\1`-`\9`, `\k<name>`), not linear-time in general.
+ * A group whose body is a fixed concatenation of atoms (no alternation, no
+ * quantifier) matches exactly one way, so repeating it stays linear - hence a
+ * pattern avoiding (a)-(c) runs in linear time.
  *
- * This REJECTS some safe patterns too (`a*b*` with disjoint alphabets,
- * `\d+-\d+` separated by a literal): they have >=2 unbounded quantifiers and
- * are refused conservatively - rewrite with a single quantifier or a character
- * class. Escapes and character classes are skipped, so `\+`, `[+*|]` are
- * treated as literals. This is sound against the known ReDoS families without
- * a heavy native engine; it is a deliberate over-approximation, not a minimal
- * one.
+ * This is a deliberate over-approximation: it also rejects some safe patterns
+ * (`a*b*` with disjoint alphabets, `\d+-\d+`, `(a|b){2}`). Rewrite those with a
+ * single quantifier or a character class. Escapes and character classes are
+ * skipped so `\+`, `[+*|]` are literals. Sound against the known ReDoS families
+ * without a native engine (re2 crashes under Bun), but not a minimal one.
  */
 function isRiskyRegex(pattern: string): boolean {
   interface Group {
-    /** Body contains a top-level alternation (recursively via nested groups). */
-    bodyHasAlternation: boolean;
+    /** Body contains an alternation or a quantifier (recursively) => ambiguous. */
+    bodyAmbiguous: boolean;
   }
   const stack: Group[] = [];
   let lastClosed: Group | null = null;
   let inClass = false;
   let unboundedCount = 0;
 
-  const markEnclosingAlternation = (): void => {
+  const markEnclosingAmbiguous = (): void => {
     const top = stack[stack.length - 1];
     if (top !== undefined) {
-      top.bodyHasAlternation = true;
+      top.bodyAmbiguous = true;
     }
   };
 
@@ -101,45 +138,67 @@ function isRiskyRegex(pattern: string): boolean {
       continue;
     }
     if (ch === '(') {
-      stack.push({ bodyHasAlternation: false });
+      stack.push({ bodyAmbiguous: false });
       lastClosed = null;
+      // Skip a group-modifier prefix so its `?`/`<` are not read as quantifiers:
+      // (?:  (?=  (?!  (?<=  (?<!  (?<name>
+      if (pattern[i + 1] === '?') {
+        const two = pattern[i + 2];
+        if (two === ':' || two === '=' || two === '!') {
+          i += 2;
+        } else if (two === '<') {
+          const three = pattern[i + 3];
+          if (three === '=' || three === '!') {
+            i += 3; // lookbehind
+          } else {
+            const gt = pattern.indexOf('>', i + 3); // named group (?<name>
+            i = gt === -1 ? pattern.length : gt;
+          }
+        }
+      }
       continue;
     }
     if (ch === ')') {
       const closed = stack.pop() ?? null;
-      if (closed !== null && closed.bodyHasAlternation) {
-        markEnclosingAlternation();
+      if (closed !== null && closed.bodyAmbiguous) {
+        markEnclosingAmbiguous();
       }
       lastClosed = closed;
       continue;
     }
     if (ch === '|') {
-      markEnclosingAlternation();
+      markEnclosingAmbiguous(); // an alternation makes the enclosing body ambiguous
       lastClosed = null;
       continue;
     }
 
-    const isUnbounded =
-      ch === '+' ||
-      ch === '*' ||
-      // {n,} with no upper bound (a comma, then `}` with no max).
-      (ch === '{' && /^\{\d*,\}/.test(pattern.slice(i)));
-
-    if (isUnbounded) {
-      unboundedCount++;
-      if (unboundedCount >= 2) {
-        return true; // polynomial or nested-exponential family
+    const quant = parseQuantifier(pattern, i);
+    if (quant !== null) {
+      // A quantifier in a group's body makes that body ambiguous (optionality /
+      // length ambiguity).
+      markEnclosingAmbiguous();
+      if (quant.unbounded) {
+        unboundedCount++;
+        if (unboundedCount >= 2) {
+          return true; // (a) two overlapping unbounded quantifiers
+        }
       }
-      // Single unbounded quantifier applied to an alternation group -> exponential.
-      if (lastClosed !== null && lastClosed.bodyHasAlternation) {
+      // (b) a repetition (max>=2 or unbounded) over an ambiguous group.
+      if (
+        (quant.unbounded || quant.maxAtLeast2) &&
+        lastClosed !== null &&
+        lastClosed.bodyAmbiguous
+      ) {
         return true;
       }
+      i += quant.length - 1; // skip the rest of a `{...}` quantifier
+      if (pattern[i + 1] === '?') {
+        i++; // consume a lazy `?` modifier
+      }
+      lastClosed = null; // the group (if any) has been consumed by the quantifier
+      continue;
     }
-    if (ch !== '?') {
-      // `?` only makes a preceding quantifier lazy; keep lastClosed so
-      // `(a|a)*?` is still caught. Any other token ends the just-closed state.
-      lastClosed = null;
-    }
+    lastClosed = null; // any other token ends the just-closed-group state
   }
   return false;
 }

@@ -43,8 +43,48 @@ describe('safeRegExp', () => {
     }
   });
 
-  test('allows unquantified or boundedly-quantified alternations', () => {
-    for (const ok of ['(a|b)', '(a|b)?', '(a|b){2,5}', '(\\d+)?', '(foo|bar)x']) {
+  test('rejects sequential unbounded quantifiers (polynomial backtracking)', () => {
+    for (const bad of ['a*a*b', '.*.*=', '\\d*\\d*b', 'a*a*a*b', 'a*.*', '\\d+-\\d+', 'a+b+']) {
+      expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
+    }
+  });
+
+  test('rejects bounded quantifiers over ambiguous groups (bounded exponential)', () => {
+    for (const bad of [
+      '(a?){30}',
+      '(.*){10}',
+      '(a+){10}',
+      '(a|a){0,30}',
+      '(a?){2}',
+      '(a*){5}',
+      '(\\w?){20}',
+      '(?:a?){30}',
+    ]) {
+      expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
+    }
+  });
+
+  test('rejects backreferences', () => {
+    for (const bad of ['(\\w+)\\1', '(a)\\1+', '(?<n>a)\\k<n>+']) {
+      expect(() => safeRegExp(bad), bad).toThrow(UnsafeRegexError);
+    }
+  });
+
+  test('allows non-ambiguous quantified groups, group modifiers and bounded repeats', () => {
+    for (const ok of [
+      '(a|b)',
+      '(a|b)?',
+      '(\\d+)?',
+      '(foo|bar)x',
+      '(ab){10}',
+      '(abc){50}',
+      '(?:ab)*c',
+      '(?:foo|bar)x',
+      '(?<year>\\d{4})',
+      '(?=foo)bar',
+      '(?<=x)y+',
+      '\\d{4}-\\d{2}',
+    ]) {
       expect(() => safeRegExp(ok), ok).not.toThrow();
     }
   });
