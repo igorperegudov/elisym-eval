@@ -88,7 +88,9 @@ function isRiskyRegex(pattern: string): boolean {
       continue;
     }
     if (inClass) {
-      if (ch === ']') {
+      if (ch === '\\') {
+        i++; // skip an escaped char (e.g. `\]`) so it doesn't close the class
+      } else if (ch === ']') {
         inClass = false;
       }
       continue;
