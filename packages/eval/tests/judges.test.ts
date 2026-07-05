@@ -82,4 +82,19 @@ describe('createOpenAIJudge / createOpenAICompatibleJudge', () => {
     const judge = createOpenAICompatibleJudge({ baseUrl: 'http://x', model: 'm' });
     await expect(judge.complete(messages)).rejects.toThrow(/no text content/);
   });
+
+  test('maxTokensParam switches the cap to max_completion_tokens (gpt-5 family)', async () => {
+    const stub = stubFetch({ choices: [{ message: { content: 'ok' } }] });
+    const judge = createOpenAIJudge({
+      model: 'gpt-5.2',
+      apiKey: 'k',
+      maxTokens: 2048,
+      maxTokensParam: 'max_completion_tokens',
+    });
+    await judge.complete(messages);
+    const [, init] = stub.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.max_completion_tokens).toBe(2048);
+    expect(body.max_tokens).toBeUndefined();
+  });
 });

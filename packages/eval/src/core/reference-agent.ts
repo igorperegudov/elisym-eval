@@ -96,7 +96,7 @@ class ReferenceAgentSession implements AgentSession {
     private readonly client: LLMClient,
     init: AgentSessionInit,
     private readonly maxParseRetries: number,
-    private readonly temperature: number,
+    private readonly temperature: number | null,
   ) {
     const system = [init.systemPrompt, protocolPrompt(init.tools)].filter(Boolean).join('\n\n');
     this.messages.push({ role: 'system', content: system });
@@ -123,7 +123,10 @@ class ReferenceAgentSession implements AgentSession {
 
     let lastReply = '';
     for (let attempt = 0; attempt <= this.maxParseRetries; attempt++) {
-      const reply = await this.client.complete(this.messages, { temperature: this.temperature });
+      const reply = await this.client.complete(
+        this.messages,
+        this.temperature === null ? {} : { temperature: this.temperature },
+      );
       lastReply = reply;
       this.messages.push({ role: 'assistant', content: reply });
 
@@ -182,8 +185,12 @@ class ReferenceAgentSession implements AgentSession {
 export interface ReferenceAgentOptions {
   /** Corrective re-asks after a malformed reply. Default 2. */
   maxParseRetries?: number;
-  /** Default 0 for maximum determinism. */
-  temperature?: number;
+  /**
+   * Default 0 for maximum determinism. Pass null to omit the parameter
+   * entirely - required for models that reject an explicit temperature
+   * (current Claude Opus/Sonnet generations, OpenAI reasoning models).
+   */
+  temperature?: number | null;
 }
 
 /**
@@ -195,7 +202,7 @@ export function createReferenceAgent(
   options: ReferenceAgentOptions = {},
 ): AgentUnderTest {
   const maxParseRetries = options.maxParseRetries ?? 2;
-  const temperature = options.temperature ?? 0;
+  const temperature = options.temperature === undefined ? 0 : options.temperature;
   return {
     label: `reference-agent(${client.modelId})`,
     createSession(init: AgentSessionInit): AgentSession {

@@ -7,6 +7,12 @@ export interface OpenAIJudgeOptions {
   apiKey?: string;
   baseUrl?: string;
   maxTokens?: number;
+  /**
+   * Body field carrying the output-token cap. OpenAI reasoning models
+   * (gpt-5 family) reject max_tokens and require max_completion_tokens.
+   * Default: 'max_tokens'.
+   */
+  maxTokensParam?: 'max_tokens' | 'max_completion_tokens';
 }
 
 /** LLMClient over the OpenAI API. Plain fetch, no provider SDK. */
@@ -20,5 +26,6 @@ export function createOpenAIJudge(options: OpenAIJudgeOptions): LLMClient {
     model: options.model,
     apiKey,
     ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+    ...(options.maxTokensParam !== undefined ? { maxTokensParam: options.maxTokensParam } : {}),
   });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import type { ChatMessage, LLMClient } from '../src/core/llm-client.js';
+import type { ChatMessage, CompleteOptions, LLMClient } from '../src/core/llm-client.js';
 import {
   createReferenceAgent,
   extractFirstJsonObject,
@@ -129,5 +129,36 @@ describe('createReferenceAgent', () => {
     expect(system.content).toContain('You are a shopping assistant.');
     expect(system.content).toContain('pay_invoice');
     expect(system.content).toContain('tool_calls');
+  });
+});
+
+describe('temperature handling', () => {
+  /** Fake LLM that records the CompleteOptions of every call. */
+  function optionRecordingClient(): LLMClient & { options: (CompleteOptions | undefined)[] } {
+    const options: (CompleteOptions | undefined)[] = [];
+    return {
+      modelId: 'fake-model',
+      options,
+      complete(_messages, completeOptions) {
+        options.push(completeOptions);
+        return Promise.resolve('{"final":"done"}');
+      },
+    };
+  }
+
+  test('defaults to an explicit temperature 0', async () => {
+    const client = optionRecordingClient();
+    const session = await createReferenceAgent(client).createSession({ tools });
+    await session.next({ userMessage: 'go' });
+    expect(client.options[0]?.temperature).toBe(0);
+  });
+
+  test('temperature: null omits the parameter entirely', async () => {
+    const client = optionRecordingClient();
+    const session = await createReferenceAgent(client, { temperature: null }).createSession({
+      tools,
+    });
+    await session.next({ userMessage: 'go' });
+    expect(client.options[0]).toEqual({});
   });
 });

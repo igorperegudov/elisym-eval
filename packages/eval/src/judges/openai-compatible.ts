@@ -7,6 +7,12 @@ export interface OpenAICompatibleJudgeOptions {
   /** Optional - many local servers need none. */
   apiKey?: string;
   maxTokens?: number;
+  /**
+   * Body field carrying the output-token cap. OpenAI reasoning models
+   * (gpt-5 family) reject max_tokens and require max_completion_tokens.
+   * Default: 'max_tokens'.
+   */
+  maxTokensParam?: 'max_tokens' | 'max_completion_tokens';
   headers?: Record<string, string>;
   /** Request timeout so a slow/hostile endpoint cannot hang the runner. Default 60s. */
   timeoutMs?: number;
@@ -66,7 +72,8 @@ export function createOpenAICompatibleJudge(options: OpenAICompatibleJudgeOption
           ...(completeOptions?.temperature !== undefined
             ? { temperature: completeOptions.temperature }
             : {}),
-          max_tokens: completeOptions?.maxTokens ?? options.maxTokens ?? 1024,
+          [options.maxTokensParam ?? 'max_tokens']:
+            completeOptions?.maxTokens ?? options.maxTokens ?? 1024,
         }),
         signal: withTimeoutSignal(
           options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS,
