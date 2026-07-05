@@ -1,10 +1,9 @@
 name: Live devnet tests
 
 on:
+  # Manual only - run on demand; skips itself gracefully when secrets are absent
+  # or the devnet wallet is dry.
   workflow_dispatch:
-  schedule:
-    # Weekly smoke run; skips itself gracefully when the devnet wallet is dry.
-    - cron: '0 6 * * 1'
 
 permissions:
   contents: read
