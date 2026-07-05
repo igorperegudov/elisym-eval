@@ -18,7 +18,7 @@ bun install
 bun run qa   # build + test + typecheck + lint + format check + spell check + dataset freshness
 ```
 
-Live devnet tests are a separate task (`bun run test:live`) and never run in PR CI. Releases: see [`docs/RELEASING.md`](docs/RELEASING.md).
+Live devnet tests are a separate task (`bun run test:live`) and never run in PR CI. Releases go through changesets; on push to `main`, `release.yml` versions and publishes via npm Trusted Publishing.
 
 ## License
 
