@@ -36,6 +36,7 @@ roleplay
 roleplays
 redteam
 requoted
+npub
 teamers
 evals
 keypair
