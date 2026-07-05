@@ -1,6 +1,6 @@
 {
   "name": "@elisym/eval-adapter-solana",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Solana PaymentAdapter for @elisym/eval - run payment evals against the elisym Solana rail",
   "keywords": [
     "ai-agents",
@@ -56,7 +56,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@elisym/eval": "~0.1.0",
+    "@elisym/eval": "~0.2.0",
     "@elisym/sdk": "~0.25.5",
     "@solana-program/memo": "~0.11.0",
     "@solana-program/system": "~0.12.0",
