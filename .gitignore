@@ -13,4 +13,6 @@ logs
 temp/
 .cache/
 docs/
+# Internal elisym-specific red-team dataset - kept local, not shipped in the public package.
+packages/eval/datasets/marketplace-v0/
 .claude/settings.local.json
