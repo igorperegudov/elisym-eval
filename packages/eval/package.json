@@ -11,13 +11,13 @@
     "payments",
     "prompt-injection"
   ],
-  "homepage": "https://github.com/igorperegudov/elisym-eval#readme",
-  "bugs": "https://github.com/igorperegudov/elisym-eval/issues",
+  "homepage": "https://github.com/elisymlabs/elisym-eval#readme",
+  "bugs": "https://github.com/elisymlabs/elisym-eval/issues",
   "license": "MIT",
   "author": "elisym labs",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/igorperegudov/elisym-eval.git",
+    "url": "git+https://github.com/elisymlabs/elisym-eval.git",
     "directory": "packages/eval"
   },
   "bin": {
